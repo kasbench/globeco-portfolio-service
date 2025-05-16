@@ -1,0 +1,23 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Step-by-Step Instructions
+
+Please perform each step when instructed.  Only perform one step at a time.
+
+
+Log each step in @cursor-log.md.  Follow the instructions at the top of the file. 
+PLEASE REMEMBER: When logging to cursor-log.md, append each entry beneath the prior entry.  Do not delete or replace any prior entries.
+
+## Steps
+
+1. Configure the project to connect to the MongoDB database as described in [requirements.mdc](mdc:documentation/requirements.mdc).
+2. This project will use Pytest and test containers.  Please configure the project to use MongoDB test containers.
+3. Please implement all necessary components following best practices to expose the CRUD APIs listed in [requirements.mdc](mdc:documentation/requirements.mdc).
+4. Please implement tests for everything generated in the prior step using test containers.
+5. Please create a Dockerfile for this application. 
+6. We will be deploying this service to Kubernetes.  Please implement liveness, readiness, and startup health checks.  
+7. Please create all the files necessary to deploy to this application as a service to Kubernetes.  Please include the liveness, readiness, and startup probes you just created.  The deployment should start with one instance of the service and should scale up to a maximum of 100 instances.  It should have up 100 millicores and 200 MiB of memory.  The liveness probe should have a timeout (`timeoutSeconds`) of 240 seconds.  The name of the service is `globeco-portfolio-service` in the `globeco` namespace.  You do not need to create the namespace. 
+8. Please generate a README.md that fully documents the service.  

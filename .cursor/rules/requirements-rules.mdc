@@ -1,0 +1,30 @@
+---
+description: 
+globs: *requirements*-md
+alwaysApply: false
+---
+When generating DTOs, please follow these rules:
+
+If you are asked to create a DTO based on a table, do the following:
+* Create a Response DTO that contains all the fields in the table.  For any fields that are foreign keys to another table, replace the type of the field with a nested Response DTO.  Call this DTO Table Name in Pascal Case appended with "ResponseDTO".  For example the response DTO for trade_type would be named TradeTypeResponseDTO.
+* Create a Request DTO for PUT.  This will contain all the fields in the table.  Do not nest any fields.  The name will be the Pascal Case table name appended with "PutDTO".  For trade_type, the name would be TradeTypePutDTO.
+* Create a Request DTO for POST.  Include all table fields except "id" and "version".  The name will be the Pascal Case table name appended with "PostDTO".  For trade_type, the name would be TradeTypePostDTO.
+
+
+When generating CRUD APIs for tables, please follow these rules.
+* Prefix all APIs with /api/v1
+* Names should be in camel case.  For example, trade_type becomes tradeType.
+* GET all and POST should be the plural form of the name.  For example, tradeTypes.
+* GET one, PUT, and DELETE should be singular.  For example, trade Type.  
+
+Using trade_type as an example, you would create the following APIs:
+
+| VERB | URI | Request DTO | Response DTO |
+| --- | --- | --- | --- |
+| GET | /api/v1/tradeTypes |  | [TradeTypeResponseDTO] |
+| GET | /api/v1/tradeType/{id} | | TradeTypeResponseDTO |
+| POST | /api/v1/tradeTypes | TradeTypePostDTO | TradeTypeResponseDTO |
+| PUT | /api/v1/tradeType/{id} | TradeTypePutDTO | TradeTypeResponseDTO |
+| Delete | /api/vi/tradeType/{id}?version={version} | | |
+
+

@@ -1,0 +1,9 @@
+---
+description: 
+globs: *.java
+alwaysApply: false
+---
+* Do not use Lombok, create getters, setters, hash, equals, constructors in the code.
+* Implement a service layer for all REST controllers.
+* Implement Caffeine for caching.
+* Implement optimistic concurrency for all entities with version columns.

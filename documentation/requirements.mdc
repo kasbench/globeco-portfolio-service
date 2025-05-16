@@ -1,0 +1,109 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# GlobeCo Portfolio Service Requirements
+
+## Background
+
+This document provides requirements for the Portfolio Service.  This service is designed to manage trades as part of a portfolio management application.
+
+This microservice will be deployed on Kubernetes 1.33.
+
+This service is part of the GlobeCo Suite.  The GlobeCo Suite is a set of applications that will be used to benchmark autoscaling in Kubernetes.  These are not production applications and will never contain real data.  They are highly simplified versions of real applications designed to evaluate autoscalers under a variety of conditions.
+
+
+Name of service: Portfolio Service <br>
+Host: globeco-portfolio-service <br>
+Port: 8000 <br>
+
+API Prefix:  /api/v1
+
+Author: Noah Kriehger <br>
+Author's email: noah@kasbench.org
+
+License: Apache 2.0
+
+## Technology
+
+| Technology | Version | Notes |
+|---------------------------|----------------|---------------------------------------|
+| Python | 3.13 | |
+| MongoDB | 8.09 | Document database |
+| FastAPI | 0.115.12 | Python web framework  |
+| Beanie | 1.29.0 | ODM for MongoDB|
+| Gunicorn | 23.0.0 | WSGI/HTTP server |
+| mongo-migration | 0.1.2 | Mongo migration tool |
+| Pytest | 8.3.5 | Testing framework
+| pytest-asyncio | 0.26.0 | Pytest plugin for async |
+| testcontainers[mongodb] | 4.10.0 | test containers for MongoDB |
+| dnspython | 2.7.0 | FastAPI requirement |
+| pydantic-settings | 2.9.1 | Tools for loading settings |
+
+
+
+
+## Database Information
+
+- The database is at globeco-portfolio-service-mongodb:27017
+- The database is `portfolio`
+- The collection is `portfolio`
+- User ID and password are not required
+
+## Schema for the portfolio collection
+
+| Database Field Name | API Field Name | Data Type | Constraint | Description |
+| --- | --- | --- | --- | --- |
+| _id | portfolioId | ObjectId | Unique | MongoDB assigned primary key |
+| name | name | String | Required | Name of the portfolio |
+| dateCreated | dateCreated | Date | Required.  Default to the current date if not supplied | Date on which the portfolio was created |
+| version | version| Integer | Required. Default to 1. | Version for optimistic concurrency.
+ 
+
+
+
+
+
+
+## DTOs
+
+
+**PortfolioResponseDTO** (Response)
+
+| API Field  | Database Field | API Type | Constraint |
+| --- | --- | --- | --- |
+| portfolioId | _id | String | Required |
+| name | name | String | Required |
+| dateCreated | dateCreated | Date | Optional |
+| version | version | Integer | Required |
+
+**PortfolioPutDTO** (PUT Request)
+
+| API Field  | Database Field | API Type | Constraint |
+| --- | --- | --- | --- |
+| portfolioId | _id | String | Required |
+| name | name | String | Required |
+| dateCreated | dateCreated | Date | Optional |
+| version | version | Integer | Required |
+
+
+**PortfolioPostDTO** (POST Request)
+
+| API Field  | Database Field | API Type | Constraint |
+| --- | --- | --- | --- |
+| name | name | String | Required |
+| dateCreated | dateCreated | Date | Optional |
+| version | version | Integer | Optional (default to 1) |
+
+## APIs
+
+
+| Verb   | URI                        | Request DTO         | Response DTO           | Description                                 |
+|--------|----------------------------|---------------------|------------------------|---------------------------------------------|
+| GET    | /api/v1/portfolios           |                     | [PortfolioResponseDTO]   | Get all portfolios                            |
+| GET    | /api/v1/portfolio/{portfolioId}       |                     | PortfolioResponseDTO     | Get a single portfolio by portfolioId                  |
+| POST   | /api/v1/portfolios           | PortfolioPostDTO      | PortfolioResponseDTO     | Create a new portfolio                        |
+| PUT    | /api/v1/portfolio/{portfolioId}       | PortfolioPutDTO       | PortfolioResponseDTO     | Update an existing portfolio by portfolioId            |
+| DELETE | /api/v1/portfolio/{portfolioId}?version={version} |         |                        | Delete a portfolio by portfolioId and version          |
+

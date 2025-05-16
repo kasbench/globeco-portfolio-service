@@ -1,0 +1,7 @@
+---
+description: 
+globs: *.py
+alwaysApply: false
+---
+See [general-rules.mdc](mdc:.cursor/rules/general-rules.mdc).
+

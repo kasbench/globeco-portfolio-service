@@ -1,0 +1,14 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Logging
+* Log every request that you receive that requires an action on your part.  Log requests in [cursor-log.md](mdc:cursor-log.md) in the root of the project.
+* Follow the instructions in [cursor-log.md](mdc:cursor-log.md).  Remember to never delete or replace an existing entry.  Add new entries to the end, leaving two blank lines between entries.  Following the sample prompt provided.
+
+
+# Consistency
+* Your objective is to maintain consistency in the code base.  When creating a new class, make sure it is consistent with other classes of the same type.  When writing documentation, make the style consistent with other parts.  When naming something, use the same naming conventions as elsewhere in the code.
+
+
