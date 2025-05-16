@@ -4,7 +4,9 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from app.config import settings
 from app.models import Portfolio
 from app.api import router as api_router
+from contextlib import asynccontextmanager
 
+@asynccontextmanager
 async def lifespan(app: FastAPI):
     client = AsyncIOMotorClient(settings.mongodb_uri)
     await init_beanie(
