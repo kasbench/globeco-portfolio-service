@@ -5,15 +5,15 @@ from app.config import settings
 from app.models import Portfolio
 from app.api import router as api_router
 
-app = FastAPI()
-
-@app.on_event("startup")
-async def app_init():
+async def lifespan(app: FastAPI):
     client = AsyncIOMotorClient(settings.mongodb_uri)
     await init_beanie(
         database=client[settings.mongodb_db],
         document_models=[Portfolio],
     )
+    yield
+
+app = FastAPI(lifespan=lifespan)
 
 app.include_router(api_router)
 

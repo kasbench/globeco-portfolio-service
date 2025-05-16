@@ -3,7 +3,7 @@ from app.models import Portfolio
 from app.schemas import PortfolioResponseDTO, PortfolioPutDTO, PortfolioPostDTO
 from bson import ObjectId
 from typing import List
-from datetime import datetime
+from datetime import datetime, UTC
 
 router = APIRouter(prefix="/api/v1")
 
@@ -33,7 +33,7 @@ async def get_portfolio(portfolioId: str):
 async def create_portfolio(dto: PortfolioPostDTO):
     portfolio = Portfolio(
         name=dto.name,
-        dateCreated=dto.dateCreated or datetime.utcnow(),
+        dateCreated=dto.dateCreated or datetime.now(UTC),
         version=dto.version or 1
     )
     await portfolio.insert()
