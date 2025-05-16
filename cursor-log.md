@@ -42,4 +42,11 @@ Actions:
 5. Updated app/main.py to register the Portfolio model with Beanie and include the new API router so endpoints are available.
 
 
+Prompt: Please execute step 4 of @execution-plan.mdc
+Actions:
+1. Reviewed the Portfolio API implementation and requirements for test coverage.
+2. Created tests/test_portfolio.py with async Pytest tests for all Portfolio CRUD operations using httpx.AsyncClient and the MongoDB test container fixture.
+3. Tests cover create, read (all/one), update (success and version conflict), delete (success and version conflict), and not-found cases, ensuring full coverage and optimistic concurrency control.
+
+
 
