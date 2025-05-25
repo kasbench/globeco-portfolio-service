@@ -49,4 +49,10 @@ Actions:
 3. Tests cover create, read (all/one), update (success and version conflict), delete (success and version conflict), and not-found cases, ensuring full coverage and optimistic concurrency control.
 
 
+Prompt: Please execute step 5 of @execution-plan.mdc
+Actions:
+1. Checked the project root for an existing Dockerfile and confirmed none was present.
+2. Created a Dockerfile for the FastAPI/Beanie/MongoDB app using Python 3.13-slim, installing dependencies with uv, exposing port 8000, and using Uvicorn as the entrypoint, following best practices for production images.
+
+
 
