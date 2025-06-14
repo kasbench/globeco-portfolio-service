@@ -4,7 +4,8 @@ from beanie import init_beanie
 from motor.motor_asyncio import AsyncIOMotorClient
 from app.config import settings
 from app.models import Portfolio
-from app.api import router as api_router
+from app import api_v1, api_v2
+from app.database import create_indexes
 from contextlib import asynccontextmanager
 
 @asynccontextmanager
@@ -14,6 +15,8 @@ async def lifespan(app: FastAPI):
         database=client[settings.mongodb_db],
         document_models=[Portfolio],
     )
+    # Create database indexes for optimal search performance
+    await create_indexes()
     yield
 
 app = FastAPI(lifespan=lifespan)
@@ -27,7 +30,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(api_router)
+# Include both v1 and v2 API routers
+app.include_router(api_v1.router)
+app.include_router(api_v2.router)
 
 @app.get("/")
 async def root():

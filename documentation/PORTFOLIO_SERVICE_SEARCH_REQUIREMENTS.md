@@ -7,26 +7,23 @@ The GlobeCo Order Service requires the ability to filter orders by portfolio nam
 ## Execution Plan
 
 ### Phase 1: Core Implementation
-- [ ] Create new DTO schemas for v2 API with pagination response format
-- [ ] Implement query parameter validation (name, name_like, limit, offset)
-- [ ] Add search functionality to Portfolio model/repository layer
-- [ ] Create new GET /api/v2/portfolios endpoint with search capability
-- [ ] Keep existing GET /api/v1/portfolios endpoint unchanged for backward compatibility
-- [ ] Add MongoDB text index on portfolio name field for performance
+- [x] Create new DTO schemas for v2 API with pagination response format
+- [x] Implement query parameter validation (name, name_like, limit, offset)
+- [x] Add search functionality to Portfolio model/repository layer
+- [x] Create new GET /api/v2/portfolios endpoint with search capability
+- [x] Keep existing GET /api/v1/portfolios endpoint unchanged for backward compatibility
+- [x] Add MongoDB text index on portfolio name field for performance
 
 ### Phase 2: Testing & Validation
-- [ ] Write unit tests for parameter validation
-- [ ] Write integration tests for search functionality
-- [ ] Write backward compatibility tests for v1 endpoint
-- [ ] Performance testing for response time requirements
-- [ ] Test case-insensitive search behavior
+- [x] Write unit tests for parameter validation
+- [x] Write integration tests for search functionality
+- [x] Write backward compatibility tests for v1 endpoint
+- [x] Performance testing for response time requirements
+- [x] Test case-insensitive search behavior
 
-### Phase 3: Documentation & Deployment
+### Phase 3: Documentation 
 - [ ] Update API documentation/OpenAPI spec with v2 endpoints
 - [ ] Create an API Guide for the Order Service LLM documenting the v2 API.
-- [ ] Deploy to staging environment
-- [ ] Validate with Order Service integration team
-- [ ] Deploy to production with monitoring
 
 ## Required Enhancement
 
