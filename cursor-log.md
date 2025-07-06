@@ -195,4 +195,36 @@ Each entry should include:
 - ✅ 20 comprehensive tests covering all Phase 2 requirements
 
 
+### 2024-12-19 - Portfolio Service Search Requirements Phase 3 Implementation
+**Request**: Execute Phase 3 of Portfolio Service Search Requirements - comprehensive documentation for the v2 API  
+**Action**: Created comprehensive API documentation and integration guide:
+- Created complete OpenAPI 3.1.0 specification with detailed v1 and v2 API documentation
+- Implemented comprehensive API guide specifically for Order Service LLM integration
+- Added detailed parameter validation rules, response schemas, and error handling documentation
+- Created practical integration patterns with working Python code examples
+- Documented performance characteristics, caching recommendations, and best practices
+**Files Modified**: 
+- `documentation/openapi.yaml` (created - comprehensive OpenAPI specification)
+- `documentation/API_GUIDE_ORDER_SERVICE_LLM.md` (created - detailed integration guide)
+- `documentation/PORTFOLIO_SERVICE_SEARCH_REQUIREMENTS.md` (updated - marked Phase 3 complete)
+**Status**: Completed
+
+**Documentation Features Implemented**:
+- ✅ Complete OpenAPI 3.1.0 specification with comprehensive schemas and examples
+- ✅ Detailed API guide with integration patterns for Order Service LLM
+- ✅ Performance documentation with guaranteed response times
+- ✅ Error handling strategies with specific scenarios and code examples
+- ✅ Integration patterns: portfolio validation, discovery, listing, ID extraction
+- ✅ Caching recommendations and pagination best practices
+- ✅ Testing approaches for validation and performance verification
+- ✅ Backward compatibility documentation and migration guidance
+
+2024-06-10: User requested OpenTelemetry instrumentation for the project, with Prometheus as the OTEL backend. Metrics and traces are sent to otel-collector.monitor.svc.cluster.local:4317 (gRPC) and otel-collector.monitor.svc.cluster.local:4318 (HTTP). Installed OpenTelemetry and Prometheus client packages (excluding unavailable Beanie/Motor instrumentations). Updated app/main.py to:
+- Set up OpenTelemetry tracing and metrics with both gRPC and HTTP OTLP exporters
+- Instrument FastAPI, HTTPX, and logging
+- Add a /metrics endpoint for Prometheus scraping
+
+2024-06-10: Created k8s manifests for deployment. Added k8s/globeco-portfolio-service.yaml for the FastAPI app (globeco-portfolio-service, port 8000, with probes and resource limits) and k8s/globeco-portfolio-service-mongodb.yaml for MongoDB as a StatefulSet (globeco-portfolio-service-mongodb, port 27017, 1 node, persistent storage). Both are in the globeco namespace.
+
+
 

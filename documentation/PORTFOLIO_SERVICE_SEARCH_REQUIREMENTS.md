@@ -22,8 +22,8 @@ The GlobeCo Order Service requires the ability to filter orders by portfolio nam
 - [x] Test case-insensitive search behavior
 
 ### Phase 3: Documentation 
-- [ ] Update API documentation/OpenAPI spec with v2 endpoints
-- [ ] Create an API Guide for the Order Service LLM documenting the v2 API.
+- [x] Update API documentation/OpenAPI spec with v2 endpoints
+- [x] Create an API Guide for the Order Service LLM documenting the v2 API.
 
 ## Required Enhancement
 

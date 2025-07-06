@@ -1,0 +1,744 @@
+openapi: 3.1.0
+info:
+  title: Portfolio Service API
+  description: |
+    A comprehensive portfolio management service providing CRUD operations and search functionality.
+    
+    ## API Versions
+    
+    ### v1 API (Backward Compatible)
+    - Simple CRUD operations
+    - Returns arrays for collection endpoints
+    - Maintains existing behavior for legacy clients
+    
+    ### v2 API (Enhanced)
+    - Advanced search functionality with case-insensitive matching
+    - Pagination support with metadata
+    - Structured response objects with pagination information
+    - Performance optimized for large datasets
+    
+    ## Authentication
+    Currently, no authentication is required for this service.
+    
+    ## Rate Limiting
+    No rate limiting is currently implemented.
+    
+    ## Error Handling
+    The API uses standard HTTP status codes and returns detailed error messages in JSON format.
+  version: 2.0.0
+  contact:
+    name: Portfolio Service Team
+    email: portfolio-service@globeco.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:8000
+    description: Local development server
+  - url: https://api.globeco.com
+    description: Production server
+
+tags:
+  - name: Portfolio v1
+    description: Legacy portfolio operations (backward compatible)
+  - name: Portfolio v2
+    description: Enhanced portfolio operations with search and pagination
+
+paths:
+  /api/v1/portfolios:
+    get:
+      tags:
+        - Portfolio v1
+      summary: Get All Portfolios (v1)
+      description: |
+        Retrieve all portfolios using the legacy v1 API.
+        
+        **Backward Compatibility**: This endpoint maintains the original behavior and response format.
+        
+        **Response Format**: Returns a simple array of portfolio objects.
+        
+        **Ordering**: Results are returned in default MongoDB order (insertion order).
+      operationId: get_portfolios_v1
+      responses:
+        '200':
+          description: Successfully retrieved all portfolios
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PortfolioResponse'
+              examples:
+                multiple_portfolios:
+                  summary: Multiple portfolios
+                  value:
+                    - portfolioId: "507f1f77bcf86cd799439011"
+                      name: "TechGrowthPortfolio"
+                      dateCreated: "2024-01-15T10:30:00Z"
+                      version: 1
+                    - portfolioId: "507f1f77bcf86cd799439012"
+                      name: "ConservativeIncomePortfolio"
+                      dateCreated: "2024-01-20T14:45:00Z"
+                      version: 2
+                empty_result:
+                  summary: No portfolios found
+                  value: []
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    
+    post:
+      tags:
+        - Portfolio v1
+      summary: Create Portfolio (v1)
+      description: |
+        Create a new portfolio using the v1 API.
+        
+        **Auto-generated Fields**:
+        - `portfolioId`: Generated automatically as MongoDB ObjectId
+        - `dateCreated`: Set to current timestamp if not provided
+        - `version`: Defaults to 1 if not provided
+      operationId: create_portfolio_v1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PortfolioCreateRequest'
+            examples:
+              basic_portfolio:
+                summary: Basic portfolio creation
+                value:
+                  name: "TechGrowthPortfolio"
+              portfolio_with_date:
+                summary: Portfolio with custom date
+                value:
+                  name: "ConservativeIncomePortfolio"
+                  dateCreated: "2024-01-20T14:45:00Z"
+                  version: 2
+      responses:
+        '201':
+          description: Portfolio created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PortfolioResponse'
+              examples:
+                created_portfolio:
+                  summary: Successfully created portfolio
+                  value:
+                    portfolioId: "507f1f77bcf86cd799439011"
+                    name: "TechGrowthPortfolio"
+                    dateCreated: "2024-01-15T10:30:00Z"
+                    version: 1
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/portfolio/{portfolioId}:
+    get:
+      tags:
+        - Portfolio v1
+      summary: Get Portfolio by ID (v1)
+      description: |
+        Retrieve a specific portfolio by its ID using the v1 API.
+        
+        **ID Format**: Must be a valid MongoDB ObjectId (24-character hexadecimal string).
+      operationId: get_portfolio_v1
+      parameters:
+        - name: portfolioId
+          in: path
+          required: true
+          description: The unique identifier of the portfolio (MongoDB ObjectId)
+          schema:
+            type: string
+            pattern: '^[0-9a-fA-F]{24}$'
+          example: "507f1f77bcf86cd799439011"
+      responses:
+        '200':
+          description: Portfolio found and returned successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PortfolioResponse'
+              examples:
+                found_portfolio:
+                  summary: Portfolio found
+                  value:
+                    portfolioId: "507f1f77bcf86cd799439011"
+                    name: "TechGrowthPortfolio"
+                    dateCreated: "2024-01-15T10:30:00Z"
+                    version: 1
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    
+    put:
+      tags:
+        - Portfolio v1
+      summary: Update Portfolio (v1)
+      description: |
+        Update an existing portfolio using the v1 API.
+        
+        **Optimistic Locking**: The version field is used for optimistic locking to prevent concurrent updates.
+        
+        **Required Fields**: All fields including portfolioId and version must be provided.
+      operationId: update_portfolio_v1
+      parameters:
+        - name: portfolioId
+          in: path
+          required: true
+          description: The unique identifier of the portfolio to update
+          schema:
+            type: string
+            pattern: '^[0-9a-fA-F]{24}$'
+          example: "507f1f77bcf86cd799439011"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PortfolioUpdateRequest'
+            examples:
+              update_portfolio:
+                summary: Update portfolio name
+                value:
+                  portfolioId: "507f1f77bcf86cd799439011"
+                  name: "UpdatedTechGrowthPortfolio"
+                  dateCreated: "2024-01-15T10:30:00Z"
+                  version: 1
+      responses:
+        '200':
+          description: Portfolio updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PortfolioResponse'
+              examples:
+                updated_portfolio:
+                  summary: Successfully updated portfolio
+                  value:
+                    portfolioId: "507f1f77bcf86cd799439011"
+                    name: "UpdatedTechGrowthPortfolio"
+                    dateCreated: "2024-01-15T10:30:00Z"
+                    version: 2
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/VersionConflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    
+    delete:
+      tags:
+        - Portfolio v1
+      summary: Delete Portfolio (v1)
+      description: |
+        Delete a portfolio using the v1 API.
+        
+        **Optimistic Locking**: The version parameter is required to ensure the portfolio hasn't been modified since last read.
+        
+        **Permanent Deletion**: This operation permanently removes the portfolio from the database.
+      operationId: delete_portfolio_v1
+      parameters:
+        - name: portfolioId
+          in: path
+          required: true
+          description: The unique identifier of the portfolio to delete
+          schema:
+            type: string
+            pattern: '^[0-9a-fA-F]{24}$'
+          example: "507f1f77bcf86cd799439011"
+        - name: version
+          in: query
+          required: true
+          description: The current version of the portfolio for optimistic locking
+          schema:
+            type: integer
+            minimum: 1
+          example: 1
+      responses:
+        '204':
+          description: Portfolio deleted successfully
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/VersionConflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v2/portfolios:
+    get:
+      tags:
+        - Portfolio v2
+      summary: Search Portfolios with Pagination (v2)
+      description: |
+        Advanced portfolio search with pagination and filtering capabilities.
+        
+        ## Search Features
+        - **Case-insensitive matching**: All text searches ignore case
+        - **Exact name search**: Use `name` parameter for precise matching
+        - **Partial name search**: Use `name_like` parameter for substring matching
+        - **Pagination**: Control result sets with `limit` and `offset`
+        - **Optimized ordering**: Results ordered by `dateCreated` descending (newest first)
+        
+        ## Performance Characteristics
+        - **Exact name search**: < 200ms response time
+        - **Partial name search**: < 500ms response time
+        - **Retrieve all portfolios**: < 300ms response time
+        - **Pagination**: < 400ms response time per page
+        
+        ## Parameter Rules
+        - Only one of `name` or `name_like` can be specified
+        - Name parameters must be 1-200 characters
+        - Name parameters allow alphanumeric characters, spaces, hyphens, and underscores
+        - If no search parameters provided, returns all portfolios with pagination
+      operationId: search_portfolios_v2
+      parameters:
+        - name: name
+          in: query
+          required: false
+          description: |
+            Search by exact portfolio name (case-insensitive).
+            
+            **Mutually exclusive** with `name_like` parameter.
+            
+            **Format**: 1-200 characters, alphanumeric + spaces, hyphens, underscores only.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
+            pattern: '^[a-zA-Z0-9\s\-_]+$'
+          example: "TechGrowthPortfolio"
+        
+        - name: name_like
+          in: query
+          required: false
+          description: |
+            Search by partial name match (case-insensitive substring search).
+            
+            **Mutually exclusive** with `name` parameter.
+            
+            **Format**: 1-200 characters, alphanumeric + spaces, hyphens, underscores only.
+            
+            **Behavior**: Finds portfolios where the name contains this substring anywhere.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
+            pattern: '^[a-zA-Z0-9\s\-_]+$'
+          example: "Tech"
+        
+        - name: limit
+          in: query
+          required: false
+          description: |
+            Maximum number of results to return per page.
+            
+            **Default**: 50
+            **Range**: 1-1000
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 50
+          example: 10
+        
+        - name: offset
+          in: query
+          required: false
+          description: |
+            Number of results to skip for pagination.
+            
+            **Default**: 0
+            **Minimum**: 0
+            
+            **Usage**: For page-based pagination, use `offset = page * limit`
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+          example: 20
+      
+      responses:
+        '200':
+          description: Search completed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PortfolioSearchResponse'
+              examples:
+                all_portfolios:
+                  summary: All portfolios (no search parameters)
+                  value:
+                    portfolios:
+                      - portfolioId: "507f1f77bcf86cd799439011"
+                        name: "TechGrowthPortfolio"
+                        dateCreated: "2024-01-15T10:30:00Z"
+                        version: 1
+                      - portfolioId: "507f1f77bcf86cd799439012"
+                        name: "ConservativeIncomePortfolio"
+                        dateCreated: "2024-01-20T14:45:00Z"
+                        version: 2
+                    pagination:
+                      totalElements: 2
+                      totalPages: 1
+                      currentPage: 0
+                      pageSize: 50
+                      hasNext: false
+                      hasPrevious: false
+                
+                exact_name_search:
+                  summary: Exact name search
+                  value:
+                    portfolios:
+                      - portfolioId: "507f1f77bcf86cd799439011"
+                        name: "TechGrowthPortfolio"
+                        dateCreated: "2024-01-15T10:30:00Z"
+                        version: 1
+                    pagination:
+                      totalElements: 1
+                      totalPages: 1
+                      currentPage: 0
+                      pageSize: 50
+                      hasNext: false
+                      hasPrevious: false
+                
+                partial_name_search:
+                  summary: Partial name search with pagination
+                  value:
+                    portfolios:
+                      - portfolioId: "507f1f77bcf86cd799439011"
+                        name: "TechGrowthPortfolio"
+                        dateCreated: "2024-01-15T10:30:00Z"
+                        version: 1
+                      - portfolioId: "507f1f77bcf86cd799439013"
+                        name: "FinTechInnovationFund"
+                        dateCreated: "2024-02-01T09:15:00Z"
+                        version: 1
+                      - portfolioId: "507f1f77bcf86cd799439014"
+                        name: "TechDividendPortfolio"
+                        dateCreated: "2024-02-10T16:20:00Z"
+                        version: 1
+                    pagination:
+                      totalElements: 3
+                      totalPages: 1
+                      currentPage: 0
+                      pageSize: 5
+                      hasNext: false
+                      hasPrevious: false
+                
+                no_results:
+                  summary: No results found
+                  value:
+                    portfolios: []
+                    pagination:
+                      totalElements: 0
+                      totalPages: 0
+                      currentPage: 0
+                      pageSize: 50
+                      hasNext: false
+                      hasPrevious: false
+                
+                paginated_results:
+                  summary: Paginated results (page 2 of 3)
+                  value:
+                    portfolios:
+                      - portfolioId: "507f1f77bcf86cd799439015"
+                        name: "Portfolio21"
+                        dateCreated: "2024-03-01T12:00:00Z"
+                        version: 1
+                      - portfolioId: "507f1f77bcf86cd799439016"
+                        name: "Portfolio22"
+                        dateCreated: "2024-03-02T12:00:00Z"
+                        version: 1
+                    pagination:
+                      totalElements: 25
+                      totalPages: 3
+                      currentPage: 1
+                      pageSize: 10
+                      hasNext: true
+                      hasPrevious: true
+        
+        '400':
+          description: Bad request - Invalid parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                mutual_exclusivity_error:
+                  summary: Both name and name_like provided
+                  value:
+                    detail: "Only one of 'name' or 'name_like' parameters can be provided"
+                invalid_name_format:
+                  summary: Invalid name format
+                  value:
+                    detail: "Name must be 1-200 characters and contain only alphanumeric characters, spaces, hyphens, and underscores"
+        
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+components:
+  schemas:
+    PortfolioResponse:
+      type: object
+      required:
+        - portfolioId
+        - name
+        - version
+      properties:
+        portfolioId:
+          type: string
+          description: Unique identifier for the portfolio (MongoDB ObjectId)
+          pattern: '^[0-9a-fA-F]{24}$'
+          example: "507f1f77bcf86cd799439011"
+        name:
+          type: string
+          description: Human-readable name of the portfolio
+          minLength: 1
+          maxLength: 200
+          example: "TechGrowthPortfolio"
+        dateCreated:
+          type: string
+          format: date-time
+          description: ISO 8601 timestamp when the portfolio was created
+          example: "2024-01-15T10:30:00Z"
+        version:
+          type: integer
+          description: Version number for optimistic locking
+          minimum: 1
+          example: 1
+    
+    PortfolioCreateRequest:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          description: Human-readable name of the portfolio
+          minLength: 1
+          maxLength: 200
+          example: "TechGrowthPortfolio"
+        dateCreated:
+          type: string
+          format: date-time
+          description: ISO 8601 timestamp when the portfolio was created (optional, defaults to current time)
+          example: "2024-01-15T10:30:00Z"
+        version:
+          type: integer
+          description: Initial version number (optional, defaults to 1)
+          minimum: 1
+          default: 1
+          example: 1
+    
+    PortfolioUpdateRequest:
+      type: object
+      required:
+        - portfolioId
+        - name
+        - version
+      properties:
+        portfolioId:
+          type: string
+          description: Unique identifier for the portfolio (must match path parameter)
+          pattern: '^[0-9a-fA-F]{24}$'
+          example: "507f1f77bcf86cd799439011"
+        name:
+          type: string
+          description: Updated name of the portfolio
+          minLength: 1
+          maxLength: 200
+          example: "UpdatedTechGrowthPortfolio"
+        dateCreated:
+          type: string
+          format: date-time
+          description: Original creation timestamp (should not be modified)
+          example: "2024-01-15T10:30:00Z"
+        version:
+          type: integer
+          description: Current version number for optimistic locking
+          minimum: 1
+          example: 1
+    
+    PortfolioSearchResponse:
+      type: object
+      required:
+        - portfolios
+        - pagination
+      properties:
+        portfolios:
+          type: array
+          description: Array of portfolio objects matching the search criteria
+          items:
+            $ref: '#/components/schemas/PortfolioResponse'
+        pagination:
+          $ref: '#/components/schemas/PaginationMetadata'
+    
+    PaginationMetadata:
+      type: object
+      required:
+        - totalElements
+        - totalPages
+        - currentPage
+        - pageSize
+        - hasNext
+        - hasPrevious
+      properties:
+        totalElements:
+          type: integer
+          description: Total number of portfolios matching the search criteria
+          minimum: 0
+          example: 25
+        totalPages:
+          type: integer
+          description: Total number of pages available
+          minimum: 0
+          example: 3
+        currentPage:
+          type: integer
+          description: Current page number (0-based)
+          minimum: 0
+          example: 1
+        pageSize:
+          type: integer
+          description: Number of items per page
+          minimum: 1
+          maximum: 1000
+          example: 10
+        hasNext:
+          type: boolean
+          description: Whether there are more pages after the current page
+          example: true
+        hasPrevious:
+          type: boolean
+          description: Whether there are pages before the current page
+          example: true
+    
+    ErrorResponse:
+      type: object
+      required:
+        - detail
+      properties:
+        detail:
+          type: string
+          description: Human-readable error message
+          example: "Portfolio not found"
+    
+    ValidationError:
+      type: object
+      required:
+        - detail
+      properties:
+        detail:
+          type: array
+          items:
+            type: object
+            required:
+              - loc
+              - msg
+              - type
+            properties:
+              loc:
+                type: array
+                items:
+                  oneOf:
+                    - type: string
+                    - type: integer
+                description: Location of the validation error
+                example: ["query", "name"]
+              msg:
+                type: string
+                description: Human-readable error message
+                example: "String should have at most 200 characters"
+              type:
+                type: string
+                description: Type of validation error
+                example: "string_too_long"
+
+  responses:
+    NotFound:
+      description: The requested resource was not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            portfolio_not_found:
+              summary: Portfolio not found
+              value:
+                detail: "Portfolio not found"
+    
+    VersionConflict:
+      description: Version conflict - the resource has been modified since last read
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            version_mismatch:
+              summary: Version mismatch
+              value:
+                detail: "Version mismatch - portfolio has been modified"
+    
+    ValidationError:
+      description: Request validation failed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ValidationError'
+          examples:
+            invalid_portfolio_id:
+              summary: Invalid portfolio ID format
+              value:
+                detail:
+                  - loc: ["path", "portfolioId"]
+                    msg: "String should match pattern '^[0-9a-fA-F]{24}$'"
+                    type: "string_pattern_mismatch"
+            missing_required_field:
+              summary: Missing required field
+              value:
+                detail:
+                  - loc: ["body", "name"]
+                    msg: "Field required"
+                    type: "missing"
+    
+    InternalServerError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            database_error:
+              summary: Database connection error
+              value:
+                detail: "Internal server error"
+
+  examples:
+    TechPortfolio:
+      summary: Technology-focused portfolio
+      value:
+        portfolioId: "507f1f77bcf86cd799439011"
+        name: "TechGrowthPortfolio"
+        dateCreated: "2024-01-15T10:30:00Z"
+        version: 1
+    
+    ConservativePortfolio:
+      summary: Conservative income portfolio
+      value:
+        portfolioId: "507f1f77bcf86cd799439012"
+        name: "ConservativeIncomePortfolio"
+        dateCreated: "2024-01-20T14:45:00Z"
+        version: 2 
