@@ -226,5 +226,9 @@ Each entry should include:
 
 2024-06-10: Created k8s manifests for deployment. Added k8s/globeco-portfolio-service.yaml for the FastAPI app (globeco-portfolio-service, port 8000, with probes and resource limits) and k8s/globeco-portfolio-service-mongodb.yaml for MongoDB as a StatefulSet (globeco-portfolio-service-mongodb, port 27017, 1 node, persistent storage). Both are in the globeco namespace.
 
+2024-06-10: Added OpenTelemetry and Prometheus dependencies to pyproject.toml ([opentelemetry-api, opentelemetry-sdk, opentelemetry-instrumentation, opentelemetry-exporter-otlp, opentelemetry-instrumentation-fastapi, opentelemetry-instrumentation-grpc, opentelemetry-instrumentation-logging, opentelemetry-instrumentation-requests, opentelemetry-instrumentation-httpx, prometheus_client]) for Docker and production compatibility, per user request.
+
+2024-06-10: Pinned OpenTelemetry and Prometheus dependencies to >=1.34.0 (or 0.55b1 for instrumentation) in pyproject.toml for compatibility with the metrics API and add_metric_reader method, per user request.
+
 
 
