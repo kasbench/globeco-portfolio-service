@@ -16,9 +16,7 @@ WORKDIR /app
 COPY . .
 
 # Install Python dependencies
-RUN pip install --upgrade pip setuptools wheel
-RUN pip install .
-RUN pip show opentelemetry-sdk opentelemetry-api
+RUN uv pip install --system --requirement pyproject.toml
 
 # Expose port
 EXPOSE 8000

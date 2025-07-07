@@ -25,3 +25,6 @@ dependencies = [
     "opentelemetry-instrumentation-httpx>=0.55b1",
     "prometheus_client>=0.22.0",
 ]
+
+[tool.setuptools]
+packages = ["app"]

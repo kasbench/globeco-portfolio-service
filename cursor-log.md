@@ -230,5 +230,9 @@ Each entry should include:
 
 2024-06-10: Pinned OpenTelemetry and Prometheus dependencies to >=1.34.0 (or 0.55b1 for instrumentation) in pyproject.toml for compatibility with the metrics API and add_metric_reader method, per user request.
 
+2024-06-10: Updated Dockerfile to upgrade pip/setuptools/wheel and add debugging commands (pip show) for OpenTelemetry versions to resolve persistent add_metric_reader error. Removed uv.lock file to ensure fresh dependency resolution.
+
+2024-06-10: Fixed OpenTelemetry metrics setup by passing metric readers to MeterProvider constructor instead of using add_metric_reader method (which doesn't exist in the current API). This resolves the AttributeError.
+
 
 
