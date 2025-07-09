@@ -24,6 +24,8 @@ spec:
           env:
             - name: MONGODB_URI
               value: "mongodb://globeco-portfolio-service-mongodb:27017"
+            - name: OTEL_METRICS_LOGGING_ENABLED
+              value: "true"
           resources:
             requests:
               cpu: "100m"

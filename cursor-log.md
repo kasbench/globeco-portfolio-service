@@ -234,5 +234,11 @@ Each entry should include:
 
 2024-06-10: Fixed OpenTelemetry metrics setup by passing metric readers to MeterProvider constructor instead of using add_metric_reader method (which doesn't exist in the current API). This resolves the AttributeError.
 
+2024-06-11: User requested temporary info-level logging every time metrics are sent to the OpenTelemetry collector, with configuration to enable or disable the logging. Added a custom LoggingPeriodicExportingMetricReader subclass in app/main.py that logs each export if the new otel_metrics_logging_enabled setting (in app/config.py, env var OTEL_METRICS_LOGGING_ENABLED) is true.
+
+2024-06-11: User requested logging of summary info (metric count, resource attributes, and exporter type) and export result for each OTel metric export. Implemented custom LoggingOTLPMetricExporterGRPC and LoggingOTLPMetricExporterHTTP in app/main.py, used in LoggingPeriodicExportingMetricReader, logging only if otel_metrics_logging_enabled is true.
+
+2024-06-11: Fixed OTel metric export summary logging in app/main.py to correctly iterate over metrics.resource_metrics, logging the number of scope metrics and resource attributes for each resource metric group, instead of accessing non-existent top-level attributes.
+
 
 
