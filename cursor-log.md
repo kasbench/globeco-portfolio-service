@@ -241,4 +241,16 @@ Each entry should include:
 2024-06-11: Fixed OTel metric export summary logging in app/main.py to correctly iterate over metrics.resource_metrics, logging the number of scope metrics and resource attributes for each resource metric group, instead of accessing non-existent top-level attributes.
 
 
+Prompt: Please update PYTHON_OTEL_INSTRUMENTATION_GUIDE.md as a guide to how to instrument python applications for OpenTelemetry.  @JAVA_OTEL_INSTRUMENTATION_GUIDE.md is an example of such a guide written for Java.  Use this application as the standard.  The goal is for all Python applications in the Globeco suite to be instrumented the same way.  You may use @OTEL_CONFIGURATION_GUIDE.md as a reference for URLs and ports.  Validate the guide against this code to make sure they are consistent.
+Actions:
+1. Reviewed app/main.py, app/config.py, pyproject.toml, and all relevant documentation to extract the actual OpenTelemetry setup, endpoints, and logging options used in this service.
+2. Compared the structure and style of JAVA_OTEL_INSTRUMENTATION_GUIDE.md to ensure the Python guide matches for consistency.
+3. Wrote a comprehensive Python OpenTelemetry Instrumentation Guide covering dependencies, configuration, default instrumentation, viewing telemetry, custom spans/metrics, logging, and a verification checklist.
+4. Used the correct collector endpoints, resource attributes, and logging options as implemented in the codebase.
+5. Updated documentation/PYTHON_OTEL_INSTRUMENTATION_GUIDE.md with the new guide.
+Files Modified:
+- documentation/PYTHON_OTEL_INSTRUMENTATION_GUIDE.md (updated)
+Status: Completed
+
+
 

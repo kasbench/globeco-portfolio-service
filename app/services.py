@@ -4,6 +4,8 @@ from bson import ObjectId
 from typing import List, Optional, Tuple
 import re
 import math
+import logging
+
 
 class PortfolioService:
     
@@ -29,6 +31,8 @@ class PortfolioService:
     @staticmethod
     async def update_portfolio(portfolio: Portfolio) -> Portfolio:
         """Update an existing portfolio"""
+        logger = logging.getLogger(__name__)
+        logger.info(f"Updating portfolio object: {portfolio}")
         await portfolio.save()
         return portfolio
     
