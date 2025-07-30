@@ -1,5 +1,6 @@
 from app.models import Portfolio
 from app.schemas import PortfolioResponseDTO, PaginationDTO, PortfolioSearchResponseDTO
+from app.tracing import trace_database_call
 from bson import ObjectId
 from typing import List, Optional, Tuple
 import re
@@ -12,20 +13,32 @@ class PortfolioService:
     @staticmethod
     async def get_all_portfolios() -> List[Portfolio]:
         """Get all portfolios for v1 API (backward compatibility)"""
-        return await Portfolio.find_all().to_list()
+        return await trace_database_call(
+            "find_all",
+            "portfolio", 
+            lambda: Portfolio.find_all().to_list()
+        )
     
     @staticmethod
     async def get_portfolio_by_id(portfolio_id: str) -> Optional[Portfolio]:
         """Get a single portfolio by ID"""
         try:
-            return await Portfolio.get(ObjectId(portfolio_id))
+            return await trace_database_call(
+                "find_by_id",
+                "portfolio",
+                lambda: Portfolio.get(ObjectId(portfolio_id))
+            )
         except:
             return None
     
     @staticmethod
     async def create_portfolio(portfolio: Portfolio) -> Portfolio:
         """Create a new portfolio"""
-        await portfolio.insert()
+        await trace_database_call(
+            "insert",
+            "portfolio",
+            lambda: portfolio.insert()
+        )
         return portfolio
     
     @staticmethod
@@ -33,13 +46,21 @@ class PortfolioService:
         """Update an existing portfolio"""
         logger = logging.getLogger(__name__)
         logger.info(f"Updating portfolio object: {portfolio}")
-        await portfolio.save()
+        await trace_database_call(
+            "update",
+            "portfolio",
+            lambda: portfolio.save()
+        )
         return portfolio
     
     @staticmethod
     async def delete_portfolio(portfolio: Portfolio) -> None:
         """Delete a portfolio"""
-        await portfolio.delete()
+        await trace_database_call(
+            "delete",
+            "portfolio",
+            lambda: portfolio.delete()
+        )
     
     @staticmethod
     async def search_portfolios(
@@ -62,10 +83,19 @@ class PortfolioService:
             query["name"] = {"$regex": re.escape(name_like), "$options": "i"}
         
         # Get total count for pagination
-        total_count = await Portfolio.find(query).count()
+        total_count = await trace_database_call(
+            "count",
+            "portfolio",
+            lambda: Portfolio.find(query).count()
+        )
         
         # Get paginated results, sorted by dateCreated descending
-        portfolios = await Portfolio.find(query).sort(-Portfolio.dateCreated).skip(offset).limit(limit).to_list()
+        portfolios = await trace_database_call(
+            "find_with_pagination",
+            "portfolio",
+            lambda: Portfolio.find(query).sort(-Portfolio.dateCreated).skip(offset).limit(limit).to_list(),
+            **{"db.query.limit": limit, "db.query.offset": offset}
+        )
         
         return portfolios, total_count
     

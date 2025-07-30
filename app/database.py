@@ -1,5 +1,6 @@
 from motor.motor_asyncio import AsyncIOMotorClient
 from app.config import settings
+from app.tracing import trace_database_call
 import logging
 
 logger = logging.getLogger(__name__)
@@ -12,11 +13,19 @@ async def create_indexes():
         portfolio_collection = db.portfolio
         
         # Create text index on name field for efficient searching
-        await portfolio_collection.create_index([("name", "text")])
+        await trace_database_call(
+            "create_text_index",
+            "portfolio",
+            lambda: portfolio_collection.create_index([("name", "text")])
+        )
         logger.info("Created text index on portfolio name field")
         
         # Create compound index for name field (case-insensitive) and dateCreated for sorting
-        await portfolio_collection.create_index([("name", 1), ("dateCreated", -1)])
+        await trace_database_call(
+            "create_compound_index", 
+            "portfolio",
+            lambda: portfolio_collection.create_index([("name", 1), ("dateCreated", -1)])
+        )
         logger.info("Created compound index on name and dateCreated fields")
         
         client.close()
