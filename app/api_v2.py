@@ -1,9 +1,11 @@
 from fastapi import APIRouter, HTTPException, Query
 from app.schemas import PortfolioSearchResponseDTO
 from app.services import PortfolioService
+from app.logging_config import get_logger
 from typing import Optional
 import re
 
+logger = get_logger(__name__)
 router = APIRouter(prefix="/api/v2")
 
 @router.get("/portfolios", response_model=PortfolioSearchResponseDTO)
@@ -24,9 +26,19 @@ async def search_portfolios(
     
     Note: Only one of 'name' or 'name_like' can be provided.
     """
+    logger.info("API v2: Search portfolios requested", 
+               endpoint="/api/v2/portfolios",
+               name=name,
+               name_like=name_like,
+               limit=limit,
+               offset=offset)
     
     # Validate mutual exclusivity of search parameters
     if name and name_like:
+        logger.warning("API v2: Both name and name_like provided", 
+                      endpoint="/api/v2/portfolios",
+                      name=name,
+                      name_like=name_like)
         raise HTTPException(
             status_code=400,
             detail="Only one search parameter allowed: name or name_like"
@@ -35,11 +47,16 @@ async def search_portfolios(
     # Validate name format if provided
     if name is not None:
         if not name.strip():
+            logger.warning("API v2: Empty name parameter provided", 
+                          endpoint="/api/v2/portfolios")
             raise HTTPException(
                 status_code=400,
                 detail="Search parameter cannot be empty"
             )
         if not _is_valid_name_format(name):
+            logger.warning("API v2: Invalid name format", 
+                          endpoint="/api/v2/portfolios",
+                          name=name)
             raise HTTPException(
                 status_code=400,
                 detail="Invalid portfolio name format. Name must be 1-200 characters, alphanumeric, spaces, hyphens, and underscores only"
@@ -48,11 +65,16 @@ async def search_portfolios(
     # Validate name_like format if provided
     if name_like is not None:
         if not name_like.strip():
+            logger.warning("API v2: Empty name_like parameter provided", 
+                          endpoint="/api/v2/portfolios")
             raise HTTPException(
                 status_code=400,
                 detail="Search parameter cannot be empty"
             )
         if not _is_valid_name_format(name_like):
+            logger.warning("API v2: Invalid name_like format", 
+                          endpoint="/api/v2/portfolios",
+                          name_like=name_like)
             raise HTTPException(
                 status_code=400,
                 detail="Invalid portfolio name format. Name must be 1-200 characters, alphanumeric, spaces, hyphens, and underscores only"
@@ -80,12 +102,29 @@ async def search_portfolios(
             page_size=limit
         )
         
-        return PortfolioSearchResponseDTO(
+        result = PortfolioSearchResponseDTO(
             portfolios=portfolio_dtos,
             pagination=pagination
         )
         
+        logger.info("API v2: Successfully searched portfolios", 
+                   endpoint="/api/v2/portfolios",
+                   total_count=total_count,
+                   returned_count=len(portfolio_dtos),
+                   current_page=current_page,
+                   limit=limit,
+                   offset=offset)
+        
+        return result
+        
+    except HTTPException:
+        raise
     except Exception as e:
+        logger.error("API v2: Error searching portfolios", 
+                    endpoint="/api/v2/portfolios",
+                    name=name,
+                    name_like=name_like,
+                    error=str(e))
         raise HTTPException(
             status_code=500,
             detail="An unexpected error occurred while searching portfolios"
@@ -102,4 +141,4 @@ def _is_valid_name_format(name: str) -> bool:
     
     # Allow alphanumeric characters, spaces, hyphens, and underscores
     pattern = r'^[a-zA-Z0-9\s\-_]+$'
-    return bool(re.match(pattern, name)) 
+    return bool(re.match(pattern, name))

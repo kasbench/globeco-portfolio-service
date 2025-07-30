@@ -14,6 +14,10 @@ from opentelemetry.instrumentation.logging import LoggingInstrumentor
 from prometheus_client import make_asgi_app
 import logging
 from app.config import settings
+from app.logging_config import setup_logging, LoggingMiddleware, get_logger
+
+# Setup structured JSON logging
+logger = setup_logging(log_level=settings.log_level)
 
 # OpenTelemetry resource
 resource = Resource.create({
@@ -116,6 +120,9 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+# Add structured logging middleware (before other middleware)
+app.add_middleware(LoggingMiddleware, logger=logger)
+
 # Instrument FastAPI app
 FastAPIInstrumentor().instrument_app(app)
 
@@ -137,4 +144,10 @@ app.include_router(api_v2.router)
 
 @app.get("/")
 async def root():
-    return {"message": "Hello World"} 
+    logger.info("Root endpoint accessed")
+    return {"message": "Hello World"}
+
+@app.get("/health")
+async def health():
+    logger.info("Health check endpoint accessed")
+    return {"status": "healthy", "service": "globeco-portfolio-service"} 
