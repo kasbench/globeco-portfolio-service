@@ -626,3 +626,466 @@ class TestMetricsRegistryIntegration:
         warning_calls = [call for call in mock_logger.warning.call_args_list 
                         if 'Metric already registered in Prometheus' in str(call)]
         assert len(warning_calls) > 0
+
+
+class TestRoutePatternExtraction:
+    """Test route pattern extraction for portfolio service endpoints."""
+    
+    def test_extract_route_pattern_root(self):
+        """Test root endpoint pattern extraction."""
+        from app.monitoring import _extract_route_pattern
+        from unittest.mock import Mock
+        
+        # Mock request for root path
+        request = Mock()
+        request.url.path = "/"
+        
+        result = _extract_route_pattern(request)
+        assert result == "/"
+    
+    def test_extract_route_pattern_empty_path(self):
+        """Test empty path pattern extraction."""
+        from app.monitoring import _extract_route_pattern
+        from unittest.mock import Mock
+        
+        # Mock request for empty path
+        request = Mock()
+        request.url.path = ""
+        
+        result = _extract_route_pattern(request)
+        assert result == "/"
+    
+    def test_extract_route_pattern_health(self):
+        """Test health endpoint pattern extraction."""
+        from app.monitoring import _extract_route_pattern
+        from unittest.mock import Mock
+        
+        # Mock request for health path
+        request = Mock()
+        request.url.path = "/health"
+        
+        result = _extract_route_pattern(request)
+        assert result == "/health"
+    
+    def test_extract_route_pattern_metrics(self):
+        """Test metrics endpoint pattern extraction."""
+        from app.monitoring import _extract_route_pattern
+        from unittest.mock import Mock
+        
+        # Mock request for metrics path
+        request = Mock()
+        request.url.path = "/metrics"
+        
+        result = _extract_route_pattern(request)
+        assert result == "/metrics"
+    
+    def test_extract_route_pattern_trailing_slash(self):
+        """Test that trailing slashes are stripped."""
+        from app.monitoring import _extract_route_pattern
+        from unittest.mock import Mock
+        
+        # Mock request with trailing slash
+        request = Mock()
+        request.url.path = "/health/"
+        
+        result = _extract_route_pattern(request)
+        assert result == "/health"
+    
+    def test_extract_route_pattern_exception_handling(self):
+        """Test exception handling in route pattern extraction."""
+        from app.monitoring import _extract_route_pattern
+        from unittest.mock import Mock, PropertyMock
+        
+        # Mock request that will cause an exception when accessing path
+        request = Mock()
+        url_mock = Mock()
+        # Make path property raise an exception
+        type(url_mock).path = PropertyMock(side_effect=Exception("Test error"))
+        request.url = url_mock
+        
+        result = _extract_route_pattern(request)
+        assert result == "/unknown"
+
+
+class TestPortfolioV1RoutePatterns:
+    """Test v1 API route pattern extraction."""
+    
+    def test_extract_portfolio_v1_portfolios_collection(self):
+        """Test v1 portfolios collection endpoint."""
+        from app.monitoring import _extract_portfolio_v1_route_pattern
+        
+        result = _extract_portfolio_v1_route_pattern("/api/v1/portfolios")
+        assert result == "/api/v1/portfolios"
+    
+    def test_extract_portfolio_v1_single_portfolio(self):
+        """Test v1 single portfolio endpoint with ObjectId."""
+        from app.monitoring import _extract_portfolio_v1_route_pattern
+        
+        # Test with MongoDB ObjectId
+        result = _extract_portfolio_v1_route_pattern("/api/v1/portfolio/507f1f77bcf86cd799439011")
+        assert result == "/api/v1/portfolio/{portfolioId}"
+    
+    def test_extract_portfolio_v1_single_portfolio_uuid(self):
+        """Test v1 single portfolio endpoint with UUID."""
+        from app.monitoring import _extract_portfolio_v1_route_pattern
+        
+        # Test with UUID
+        result = _extract_portfolio_v1_route_pattern("/api/v1/portfolio/550e8400-e29b-41d4-a716-446655440000")
+        assert result == "/api/v1/portfolio/{portfolioId}"
+    
+    def test_extract_portfolio_v1_single_portfolio_numeric(self):
+        """Test v1 single portfolio endpoint with numeric ID."""
+        from app.monitoring import _extract_portfolio_v1_route_pattern
+        
+        # Test with numeric ID
+        result = _extract_portfolio_v1_route_pattern("/api/v1/portfolio/12345")
+        assert result == "/api/v1/portfolio/{portfolioId}"
+    
+    def test_extract_portfolio_v1_unknown_pattern(self):
+        """Test v1 unknown pattern fallback."""
+        from app.monitoring import _extract_portfolio_v1_route_pattern
+        
+        # Test with unexpected pattern
+        result = _extract_portfolio_v1_route_pattern("/api/v1/portfolio/something/else/here")
+        assert result == "/api/v1/portfolio/unknown"
+    
+    def test_extract_route_pattern_v1_integration(self):
+        """Test full integration with v1 routes."""
+        from app.monitoring import _extract_route_pattern
+        from unittest.mock import Mock
+        
+        # Test v1 portfolios collection
+        request = Mock()
+        request.url.path = "/api/v1/portfolios"
+        result = _extract_route_pattern(request)
+        assert result == "/api/v1/portfolios"
+        
+        # Test v1 single portfolio
+        request.url.path = "/api/v1/portfolio/507f1f77bcf86cd799439011"
+        result = _extract_route_pattern(request)
+        assert result == "/api/v1/portfolio/{portfolioId}"
+
+
+class TestPortfolioV2RoutePatterns:
+    """Test v2 API route pattern extraction."""
+    
+    def test_extract_portfolio_v2_portfolios_search(self):
+        """Test v2 portfolios search endpoint."""
+        from app.monitoring import _extract_portfolio_v2_route_pattern
+        
+        result = _extract_portfolio_v2_route_pattern("/api/v2/portfolios")
+        assert result == "/api/v2/portfolios"
+    
+    def test_extract_portfolio_v2_unknown_pattern(self):
+        """Test v2 unknown pattern fallback."""
+        from app.monitoring import _extract_portfolio_v2_route_pattern
+        
+        # Test with unexpected pattern
+        result = _extract_portfolio_v2_route_pattern("/api/v2/portfolios/something/else")
+        assert result == "/api/v2/portfolios/unknown"
+    
+    def test_extract_route_pattern_v2_integration(self):
+        """Test full integration with v2 routes."""
+        from app.monitoring import _extract_route_pattern
+        from unittest.mock import Mock
+        
+        # Test v2 portfolios search
+        request = Mock()
+        request.url.path = "/api/v2/portfolios"
+        result = _extract_route_pattern(request)
+        assert result == "/api/v2/portfolios"
+
+
+class TestIDDetection:
+    """Test ID detection logic for route sanitization."""
+    
+    def test_looks_like_id_mongodb_objectid(self):
+        """Test MongoDB ObjectId detection."""
+        from app.monitoring import _looks_like_id
+        
+        # Valid MongoDB ObjectIds (24 character hex)
+        assert _looks_like_id("507f1f77bcf86cd799439011") is True
+        assert _looks_like_id("507F1F77BCF86CD799439011") is True  # Uppercase
+        assert _looks_like_id("000000000000000000000000") is True  # All zeros
+        assert _looks_like_id("ffffffffffffffffffffffff") is True  # All f's
+        
+        # Invalid ObjectIds
+        assert _looks_like_id("507f1f77bcf86cd79943901") is False   # 23 chars
+        assert _looks_like_id("507f1f77bcf86cd7994390111") is False # 25 chars
+        assert _looks_like_id("507f1f77bcf86cd79943901g") is False  # Invalid hex char
+    
+    def test_looks_like_id_uuid_with_hyphens(self):
+        """Test UUID with hyphens detection."""
+        from app.monitoring import _looks_like_id
+        
+        # Valid UUIDs with hyphens
+        assert _looks_like_id("550e8400-e29b-41d4-a716-446655440000") is True
+        assert _looks_like_id("6ba7b810-9dad-11d1-80b4-00c04fd430c8") is True
+        assert _looks_like_id("00000000-0000-0000-0000-000000000000") is True
+        
+        # Invalid UUIDs
+        assert _looks_like_id("550e8400-e29b-41d4-a716-44665544000") is False  # Wrong length
+        assert _looks_like_id("550e8400-e29b-41d4-a716-44665544000g") is False # Invalid hex
+        assert _looks_like_id("550e8400-e29b-41d4-a716") is False              # Too short
+        # Note: UUID without hyphens is still a valid ID, just detected by different rule
+    
+    def test_looks_like_id_uuid_without_hyphens(self):
+        """Test UUID without hyphens detection."""
+        from app.monitoring import _looks_like_id
+        
+        # Valid UUIDs without hyphens (32 character hex)
+        assert _looks_like_id("550e8400e29b41d4a716446655440000") is True
+        assert _looks_like_id("6ba7b8109dad11d180b400c04fd430c8") is True
+        assert _looks_like_id("00000000000000000000000000000000") is True
+        assert _looks_like_id("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF") is True  # Uppercase
+        
+        # Invalid UUIDs
+        assert _looks_like_id("550e8400e29b41d4a71644665544000") is False   # 31 chars
+        assert _looks_like_id("550e8400e29b41d4a7164466554400000") is False # 33 chars
+        assert _looks_like_id("550e8400e29b41d4a716446655440g00") is False  # Invalid hex
+    
+    def test_looks_like_id_numeric(self):
+        """Test numeric ID detection."""
+        from app.monitoring import _looks_like_id
+        
+        # Valid numeric IDs
+        assert _looks_like_id("1") is True
+        assert _looks_like_id("123") is True
+        assert _looks_like_id("12345") is True
+        assert _looks_like_id("999999999999999999") is True
+        
+        # Invalid numeric IDs
+        assert _looks_like_id("123abc") is False
+        assert _looks_like_id("abc123") is False
+        assert _looks_like_id("12.34") is False
+        assert _looks_like_id("") is False
+    
+    def test_looks_like_id_alphanumeric(self):
+        """Test long alphanumeric ID detection."""
+        from app.monitoring import _looks_like_id
+        
+        # Valid long alphanumeric IDs (>8 chars, contains non-letters)
+        assert _looks_like_id("abc123def456") is True      # 12 chars with numbers
+        assert _looks_like_id("user_12345_session") is True # With underscores and numbers
+        assert _looks_like_id("token-abc123-def") is True   # With hyphens and numbers
+        assert _looks_like_id("session123456789") is True   # 16 chars with numbers
+        
+        # Invalid alphanumeric IDs
+        assert _looks_like_id("abcdefgh") is False          # 8 chars, all letters
+        assert _looks_like_id("abcdefghi") is False         # 9 chars, all letters
+        assert _looks_like_id("short1") is False            # 6 chars
+        assert _looks_like_id("test") is False              # 4 chars, all letters
+        assert _looks_like_id("") is False                  # Empty string
+    
+    def test_looks_like_id_edge_cases(self):
+        """Test edge cases for ID detection."""
+        from app.monitoring import _looks_like_id
+        
+        # Edge cases that should not be considered IDs
+        assert _looks_like_id("portfolios") is False        # Regular word
+        assert _looks_like_id("api") is False               # Regular word
+        assert _looks_like_id("v1") is False                # Version identifier
+        assert _looks_like_id("health") is False            # Endpoint name
+        assert _looks_like_id("metrics") is False           # Endpoint name
+        assert _looks_like_id("search") is False            # Action name
+        
+        # Borderline cases
+        assert _looks_like_id("version1") is False          # 8 chars with number
+        assert _looks_like_id("version12") is True          # 9 chars with number
+    
+    def test_looks_like_id_exception_handling(self):
+        """Test exception handling in ID detection."""
+        from app.monitoring import _looks_like_id
+        
+        # Test with None (should not raise exception)
+        assert _looks_like_id(None) is False
+        
+        # Test with non-string types (should not raise exception)
+        assert _looks_like_id(123) is False
+        assert _looks_like_id([]) is False
+        assert _looks_like_id({}) is False
+
+
+class TestRouteSanitization:
+    """Test route sanitization for unmatched patterns."""
+    
+    def test_sanitize_unmatched_route_simple(self):
+        """Test sanitization of simple unmatched routes."""
+        from app.monitoring import _sanitize_unmatched_route
+        
+        # Simple path without IDs
+        result = _sanitize_unmatched_route("/api/v3/users")
+        assert result == "/api/v3/users"
+        
+        # Path with regular words
+        result = _sanitize_unmatched_route("/admin/dashboard/settings")
+        assert result == "/admin/dashboard/settings"
+    
+    def test_sanitize_unmatched_route_with_ids(self):
+        """Test sanitization of routes with various ID types."""
+        from app.monitoring import _sanitize_unmatched_route
+        
+        # MongoDB ObjectId
+        result = _sanitize_unmatched_route("/api/v3/users/507f1f77bcf86cd799439011")
+        assert result == "/api/v3/users/{id}"
+        
+        # UUID with hyphens
+        result = _sanitize_unmatched_route("/api/v3/users/550e8400-e29b-41d4-a716-446655440000")
+        assert result == "/api/v3/users/{id}"
+        
+        # UUID without hyphens
+        result = _sanitize_unmatched_route("/api/v3/users/550e8400e29b41d4a716446655440000")
+        assert result == "/api/v3/users/{id}"
+        
+        # Numeric ID
+        result = _sanitize_unmatched_route("/api/v3/users/12345")
+        assert result == "/api/v3/users/{id}"
+        
+        # Long alphanumeric ID
+        result = _sanitize_unmatched_route("/api/v3/users/session123456789")
+        assert result == "/api/v3/users/{id}"
+    
+    def test_sanitize_unmatched_route_multiple_ids(self):
+        """Test sanitization of routes with multiple IDs."""
+        from app.monitoring import _sanitize_unmatched_route
+        
+        # Multiple IDs in path
+        result = _sanitize_unmatched_route("/api/v3/users/12345/posts/507f1f77bcf86cd799439011")
+        assert result == "/api/v3/users/{id}/posts/{id}"
+        
+        # Mixed IDs and regular segments
+        result = _sanitize_unmatched_route("/api/v3/users/12345/profile/settings")
+        assert result == "/api/v3/users/{id}/profile/settings"
+    
+    def test_sanitize_unmatched_route_empty_segments(self):
+        """Test sanitization with empty path segments."""
+        from app.monitoring import _sanitize_unmatched_route
+        
+        # Double slashes (empty segments)
+        result = _sanitize_unmatched_route("/api//v3/users")
+        assert result == "/api//v3/users"
+        
+        # Leading/trailing empty segments
+        result = _sanitize_unmatched_route("//api/v3/users//")
+        assert result == "//api/v3/users//"
+    
+    def test_sanitize_unmatched_route_long_segments(self):
+        """Test sanitization with very long path segments."""
+        from app.monitoring import _sanitize_unmatched_route
+        
+        # Very long segment (should be truncated)
+        long_segment = "a" * 100
+        result = _sanitize_unmatched_route(f"/api/v3/{long_segment}")
+        assert result == f"/api/v3/{long_segment[:50]}"
+        
+        # Segment exactly at limit
+        limit_segment = "a" * 50
+        result = _sanitize_unmatched_route(f"/api/v3/{limit_segment}")
+        assert result == f"/api/v3/{limit_segment}"
+    
+    def test_sanitize_unmatched_route_very_long_path(self):
+        """Test sanitization with very long overall path."""
+        from app.monitoring import _sanitize_unmatched_route
+        
+        # Create a path longer than 200 characters
+        long_path = "/api/v3/" + "/".join(["segment"] * 30)  # Should be > 200 chars
+        result = _sanitize_unmatched_route(long_path)
+        assert result == "/unknown"
+    
+    def test_sanitize_unmatched_route_exception_handling(self):
+        """Test exception handling in route sanitization."""
+        from app.monitoring import _sanitize_unmatched_route
+        
+        # Test with None (should not raise exception)
+        result = _sanitize_unmatched_route(None)
+        assert result == "/unknown"
+        
+        # Test with non-string (should not raise exception)
+        result = _sanitize_unmatched_route(123)
+        assert result == "/unknown"
+
+
+class TestRoutePatternIntegration:
+    """Integration tests for complete route pattern extraction."""
+    
+    def test_all_portfolio_service_routes(self):
+        """Test all known portfolio service routes."""
+        from app.monitoring import _extract_route_pattern
+        from unittest.mock import Mock
+        
+        test_cases = [
+            # Root and utility endpoints
+            ("/", "/"),
+            ("/health", "/health"),
+            ("/metrics", "/metrics"),
+            
+            # V1 API endpoints
+            ("/api/v1/portfolios", "/api/v1/portfolios"),
+            ("/api/v1/portfolio/507f1f77bcf86cd799439011", "/api/v1/portfolio/{portfolioId}"),
+            ("/api/v1/portfolio/550e8400-e29b-41d4-a716-446655440000", "/api/v1/portfolio/{portfolioId}"),
+            ("/api/v1/portfolio/12345", "/api/v1/portfolio/{portfolioId}"),
+            
+            # V2 API endpoints
+            ("/api/v2/portfolios", "/api/v2/portfolios"),
+            
+            # Unknown routes (should be sanitized)
+            ("/api/v3/unknown", "/api/v3/unknown"),
+            ("/api/v3/users/12345", "/api/v3/users/{id}"),
+            ("/admin/users/507f1f77bcf86cd799439011/profile", "/admin/users/{id}/profile"),
+        ]
+        
+        for input_path, expected_pattern in test_cases:
+            request = Mock()
+            request.url.path = input_path
+            result = _extract_route_pattern(request)
+            assert result == expected_pattern, f"Failed for path {input_path}: expected {expected_pattern}, got {result}"
+    
+    def test_route_pattern_with_query_parameters(self):
+        """Test that query parameters don't affect route pattern extraction."""
+        from app.monitoring import _extract_route_pattern
+        from unittest.mock import Mock
+        
+        # Query parameters should not affect the path extraction
+        request = Mock()
+        request.url.path = "/api/v2/portfolios"  # Path without query params
+        
+        result = _extract_route_pattern(request)
+        assert result == "/api/v2/portfolios"
+    
+    def test_route_pattern_case_sensitivity(self):
+        """Test route pattern extraction with different cases."""
+        from app.monitoring import _extract_route_pattern
+        from unittest.mock import Mock
+        
+        # Test case sensitivity - paths should be case sensitive
+        test_cases = [
+            ("/API/V1/PORTFOLIOS", "/API/V1/PORTFOLIOS"),  # Should not match v1 pattern
+            ("/api/V1/portfolios", "/api/V1/portfolios"),  # Should not match v1 pattern
+            ("/api/v1/PORTFOLIOS", "/api/v1/PORTFOLIOS"),  # Should not match v1 pattern
+        ]
+        
+        for input_path, expected_pattern in test_cases:
+            request = Mock()
+            request.url.path = input_path
+            result = _extract_route_pattern(request)
+            assert result == expected_pattern, f"Failed for path {input_path}: expected {expected_pattern}, got {result}"
+    
+    def test_route_pattern_with_trailing_slashes(self):
+        """Test route pattern extraction with trailing slashes."""
+        from app.monitoring import _extract_route_pattern
+        from unittest.mock import Mock
+        
+        # Trailing slashes should be stripped
+        test_cases = [
+            ("/api/v1/portfolios/", "/api/v1/portfolios"),
+            ("/api/v1/portfolio/12345/", "/api/v1/portfolio/{portfolioId}"),
+            ("/api/v2/portfolios/", "/api/v2/portfolios"),
+            ("/health/", "/health"),
+            ("/metrics/", "/metrics"),
+        ]
+        
+        for input_path, expected_pattern in test_cases:
+            request = Mock()
+            request.url.path = input_path
+            result = _extract_route_pattern(request)
+            assert result == expected_pattern, f"Failed for path {input_path}: expected {expected_pattern}, got {result}"

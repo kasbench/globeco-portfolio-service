@@ -25,7 +25,7 @@
   - Review #[[file:documentation/http-metrics-implementation-guide-python.md]] for consistency.
   - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 4.2_
 
-- [ ] 4. Implement portfolio-specific route pattern extraction
+- [x] 4. Implement portfolio-specific route pattern extraction
   - Create `_extract_route_pattern()` method with portfolio service specific patterns
   - Implement `_extract_portfolio_v1_route_pattern()` for `/api/v1/portfolio/{portfolioId}` routes
   - Implement `_extract_portfolio_v2_route_pattern()` for `/api/v2/portfolios` routes

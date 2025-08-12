@@ -208,6 +208,216 @@ def get_metric_status() -> Dict[str, Dict[str, Any]]:
     return status
 
 
+def _extract_route_pattern(request: Request) -> str:
+    """
+    Extract route pattern from request URL to prevent high cardinality metrics.
+    
+    Converts URLs with parameters to route patterns specific to the GlobeCo Portfolio Service.
+    For example: /api/v1/portfolio/507f1f77bcf86cd799439011 -> /api/v1/portfolio/{portfolioId}
+    
+    Args:
+        request: FastAPI Request object
+        
+    Returns:
+        Route pattern string with parameterized IDs
+    """
+    try:
+        path = request.url.path.rstrip('/')
+        
+        if not path:
+            return "/"
+        
+        # Portfolio service specific route patterns
+        if path.startswith("/api/v1/portfolio"):
+            return _extract_portfolio_v1_route_pattern(path)
+        elif path.startswith("/api/v2/portfolios"):
+            return _extract_portfolio_v2_route_pattern(path)
+        elif path == "/health":
+            return "/health"
+        elif path == "/metrics":
+            return "/metrics"
+        elif path == "/":
+            return "/"
+        
+        # Fallback for unmatched routes
+        return _sanitize_unmatched_route(path)
+        
+    except Exception as e:
+        # Safely get path for logging without causing another exception
+        try:
+            path_for_logging = getattr(request.url, 'path', 'unknown')
+        except Exception:
+            path_for_logging = 'unknown'
+            
+        logger.error(
+            "Failed to extract route pattern",
+            error=str(e),
+            error_type=type(e).__name__,
+            path=path_for_logging,
+            exc_info=True
+        )
+        return "/unknown"
+
+
+def _extract_portfolio_v1_route_pattern(path: str) -> str:
+    """
+    Extract route pattern for v1 API portfolio endpoints.
+    
+    Handles:
+    - /api/v1/portfolios (collection operations)
+    - /api/v1/portfolio/{portfolioId} (individual portfolio operations)
+    
+    Args:
+        path: URL path string
+        
+    Returns:
+        Parameterized route pattern
+    """
+    parts = path.split("/")
+    
+    if len(parts) == 4:  # /api/v1/portfolios
+        return "/api/v1/portfolios"
+    elif len(parts) == 5:  # /api/v1/portfolio/{portfolioId}
+        return "/api/v1/portfolio/{portfolioId}"
+    
+    # Fallback for unexpected v1 patterns
+    return "/api/v1/portfolio/unknown"
+
+
+def _extract_portfolio_v2_route_pattern(path: str) -> str:
+    """
+    Extract route pattern for v2 API portfolio endpoints.
+    
+    Handles:
+    - /api/v2/portfolios (search with query parameters)
+    
+    Args:
+        path: URL path string
+        
+    Returns:
+        Parameterized route pattern
+    """
+    parts = path.split("/")
+    
+    if len(parts) == 4:  # /api/v2/portfolios
+        return "/api/v2/portfolios"
+    
+    # Fallback for unexpected v2 patterns
+    return "/api/v2/portfolios/unknown"
+
+
+def _sanitize_unmatched_route(path: str) -> str:
+    """
+    Sanitize unmatched routes to prevent high cardinality metrics.
+    
+    This method handles routes that don't match the known portfolio service patterns
+    by parameterizing ID-like path segments to prevent metric explosion.
+    
+    Args:
+        path: URL path string
+        
+    Returns:
+        Sanitized route pattern with IDs parameterized
+    """
+    try:
+        parts = path.split("/")
+        sanitized_parts = []
+        
+        for part in parts:
+            if not part:
+                sanitized_parts.append(part)
+                continue
+            
+            # Check if part looks like an ID that should be parameterized
+            if _looks_like_id(part):
+                sanitized_parts.append("{id}")
+            else:
+                # Keep the original part but limit length to prevent abuse
+                sanitized_part = part[:50] if len(part) > 50 else part
+                sanitized_parts.append(sanitized_part)
+        
+        result = "/".join(sanitized_parts)
+        
+        # Ensure we don't create overly long patterns
+        if len(result) > 200:
+            return "/unknown"
+        
+        return result
+        
+    except Exception as e:
+        logger.error(
+            "Failed to sanitize unmatched route",
+            error=str(e),
+            path=path,
+            exc_info=True
+        )
+        return "/unknown"
+
+
+def _looks_like_id(part: str) -> bool:
+    """
+    Check if a path part looks like an ID that should be parameterized.
+    
+    Detects various ID formats commonly used in APIs:
+    - MongoDB ObjectId (24-character hexadecimal)
+    - UUID (with or without hyphens)
+    - Numeric IDs
+    - Long alphanumeric identifiers
+    
+    Args:
+        part: Path segment to check
+        
+    Returns:
+        True if the part looks like an ID that should be parameterized
+    """
+    try:
+        # Early return for empty or None
+        if not part:
+            return False
+        
+        # MongoDB ObjectId (exactly 24 character hex)
+        if len(part) == 24 and all(c in '0123456789abcdefABCDEF' for c in part):
+            return True
+        
+        # UUID format (with hyphens: exactly 8-4-4-4-12 format)
+        if len(part) == 36 and part.count('-') == 4:
+            uuid_parts = part.split('-')
+            if (len(uuid_parts) == 5 and 
+                len(uuid_parts[0]) == 8 and len(uuid_parts[1]) == 4 and 
+                len(uuid_parts[2]) == 4 and len(uuid_parts[3]) == 4 and 
+                len(uuid_parts[4]) == 12):
+                # Check if all parts are hexadecimal
+                try:
+                    for uuid_part in uuid_parts:
+                        int(uuid_part, 16)
+                    return True
+                except ValueError:
+                    return False
+        
+        # UUID format (without hyphens: exactly 32 character hex)
+        if len(part) == 32 and all(c in '0123456789abcdefABCDEF' for c in part):
+            return True
+        
+        # Numeric ID (pure digits)
+        if part.isdigit() and len(part) >= 1:
+            return True
+        
+        # Long alphanumeric ID that looks like an identifier
+        # Only consider if it doesn't match the specific formats above
+        if (len(part) > 8 and 
+            part.replace('-', '').replace('_', '').isalnum() and
+            not part.isalpha() and  # Must contain at least one non-letter
+            # Exclude strings that look like malformed hex IDs (close to ObjectId/UUID length)
+            not (20 <= len(part) <= 40)):
+            return True
+        
+        return False
+        
+    except Exception:
+        # If any error occurs during ID detection, err on the side of caution
+        return False
+
+
 # Initialize metrics on module import
 logger.info("Enhanced HTTP metrics monitoring module initialized")
 logger.info(f"Metrics registry contains {len(_METRICS_REGISTRY)} metrics")
