@@ -16,7 +16,7 @@
   - Review #[[file:documentation/http-metrics-implementation-guide-python.md]] for consistency.
   - _Requirements: 3.6, 5.2, 5.3_
 
-- [ ] 3. Implement core HTTP metrics with Prometheus client
+- [x] 3. Implement core HTTP metrics with Prometheus client
   - Define `HTTP_REQUESTS_TOTAL` counter with method, path, status labels
   - Define `HTTP_REQUEST_DURATION` histogram with millisecond buckets [5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000]
   - Define `HTTP_REQUESTS_IN_FLIGHT` gauge without labels

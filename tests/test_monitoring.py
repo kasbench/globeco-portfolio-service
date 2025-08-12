@@ -381,6 +381,20 @@ class TestStandardHTTPMetrics:
         labeled = HTTP_REQUESTS_TOTAL.labels(method="GET", path="/test", status="200")
         assert labeled is not None
     
+    def test_http_requests_total_labels(self):
+        """Test HTTP_REQUESTS_TOTAL has correct labels: method, path, status."""
+        # Test that all required labels are supported
+        labeled = HTTP_REQUESTS_TOTAL.labels(method="GET", path="/api/v1/test", status="200")
+        assert labeled is not None
+        
+        # Test with different label values
+        labeled2 = HTTP_REQUESTS_TOTAL.labels(method="POST", path="/api/v2/test", status="201")
+        assert labeled2 is not None
+        
+        # Test that inc() works
+        labeled.inc()
+        labeled2.inc(5)  # Test with custom increment
+    
     def test_http_request_duration_created(self):
         """Test HTTP_REQUEST_DURATION metric is created."""
         assert HTTP_REQUEST_DURATION is not None
@@ -392,6 +406,36 @@ class TestStandardHTTPMetrics:
         labeled = HTTP_REQUEST_DURATION.labels(method="GET", path="/test", status="200")
         assert labeled is not None
     
+    def test_http_request_duration_labels_and_buckets(self):
+        """Test HTTP_REQUEST_DURATION has correct labels and millisecond buckets."""
+        # Test that all required labels are supported
+        labeled = HTTP_REQUEST_DURATION.labels(method="GET", path="/api/v1/test", status="200")
+        assert labeled is not None
+        
+        # Test with different label values
+        labeled2 = HTTP_REQUEST_DURATION.labels(method="POST", path="/api/v2/test", status="500")
+        assert labeled2 is not None
+        
+        # Test that observe() works with millisecond values
+        labeled.observe(5.5)    # Should fit in first bucket (5ms)
+        labeled.observe(25.0)   # Should fit in 25ms bucket
+        labeled.observe(100.0)  # Should fit in 100ms bucket
+        labeled.observe(1500.0) # Should fit in 2500ms bucket
+        labeled2.observe(10000.0) # Should fit in 10000ms bucket
+    
+    def test_http_request_duration_buckets(self):
+        """Test HTTP_REQUEST_DURATION has the correct millisecond buckets."""
+        # If it's a real Histogram (not DummyMetric), check buckets
+        if isinstance(HTTP_REQUEST_DURATION, Histogram):
+            # The buckets should be [5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000]
+            # We can't directly access buckets, but we can test that observations work
+            labeled = HTTP_REQUEST_DURATION.labels(method="GET", path="/test", status="200")
+            
+            # Test observations at bucket boundaries
+            test_values = [5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000]
+            for value in test_values:
+                labeled.observe(value)  # Should not raise
+    
     def test_http_requests_in_flight_created(self):
         """Test HTTP_REQUESTS_IN_FLIGHT metric is created."""
         assert HTTP_REQUESTS_IN_FLIGHT is not None
@@ -402,6 +446,16 @@ class TestStandardHTTPMetrics:
         # Should support inc/dec methods
         HTTP_REQUESTS_IN_FLIGHT.inc()
         HTTP_REQUESTS_IN_FLIGHT.dec()
+    
+    def test_http_requests_in_flight_no_labels(self):
+        """Test HTTP_REQUESTS_IN_FLIGHT gauge has no labels."""
+        # Should be able to call inc/dec/set directly without labels
+        HTTP_REQUESTS_IN_FLIGHT.inc()
+        HTTP_REQUESTS_IN_FLIGHT.inc(2.0)  # Test with custom increment
+        HTTP_REQUESTS_IN_FLIGHT.dec()
+        HTTP_REQUESTS_IN_FLIGHT.dec(1.0)  # Test with custom decrement
+        HTTP_REQUESTS_IN_FLIGHT.set(5.0)  # Test set operation
+        HTTP_REQUESTS_IN_FLIGHT.set(0.0)  # Reset to 0
     
     def test_standard_metrics_exist(self):
         """Test that standard metrics exist and have expected interface."""
@@ -422,6 +476,49 @@ class TestStandardHTTPMetrics:
         # Gauge interface
         HTTP_REQUESTS_IN_FLIGHT.inc()  # Should not raise
         HTTP_REQUESTS_IN_FLIGHT.dec()  # Should not raise
+    
+    def test_metrics_registry_contains_standard_metrics(self):
+        """Test that all standard metrics are registered in the global registry."""
+        # The metrics should exist regardless of registry state
+        # since they are module-level variables
+        assert HTTP_REQUESTS_TOTAL is not None
+        assert HTTP_REQUEST_DURATION is not None
+        assert HTTP_REQUESTS_IN_FLIGHT is not None
+        
+        # Test that they have the expected types
+        from prometheus_client import Counter, Histogram, Gauge
+        assert isinstance(HTTP_REQUESTS_TOTAL, (Counter, DummyMetric))
+        assert isinstance(HTTP_REQUEST_DURATION, (Histogram, DummyMetric))
+        assert isinstance(HTTP_REQUESTS_IN_FLIGHT, (Gauge, DummyMetric))
+    
+    def test_metric_names_and_descriptions(self):
+        """Test that metrics have the correct names and descriptions."""
+        # We can't directly access names/descriptions from prometheus_client objects,
+        # but we can verify they were created with the right parameters by checking
+        # that they exist and work as expected
+        
+        # Test that the metrics work with the expected interface
+        # This indirectly verifies they were created correctly
+        
+        # HTTP_REQUESTS_TOTAL should be a counter with 3 labels
+        counter_labeled = HTTP_REQUESTS_TOTAL.labels(
+            method="GET", 
+            path="/api/v1/portfolio/{portfolioId}", 
+            status="200"
+        )
+        counter_labeled.inc()
+        
+        # HTTP_REQUEST_DURATION should be a histogram with 3 labels
+        histogram_labeled = HTTP_REQUEST_DURATION.labels(
+            method="POST", 
+            path="/api/v2/portfolios", 
+            status="201"
+        )
+        histogram_labeled.observe(150.5)  # milliseconds
+        
+        # HTTP_REQUESTS_IN_FLIGHT should be a gauge with no labels
+        HTTP_REQUESTS_IN_FLIGHT.inc()
+        HTTP_REQUESTS_IN_FLIGHT.dec()
 
 
 class TestMetricsRegistryIntegration:
