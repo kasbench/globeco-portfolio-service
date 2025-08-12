@@ -127,7 +127,60 @@ app.add_middleware(LoggingMiddleware, logger=logger)
 FastAPIInstrumentor().instrument_app(app)
 
 # Add Prometheus /metrics endpoint
-app.mount("/metrics", make_asgi_app())
+metrics_app = make_asgi_app()
+app.mount("/metrics", metrics_app)
+
+# Add explicit route for /metrics (without trailing slash)
+@app.get("/metrics")
+async def get_metrics():
+    from fastapi import Request
+    from fastapi.responses import Response
+    import asyncio
+    
+    # Create a mock request for the metrics app
+    scope = {
+        'type': 'http',
+        'method': 'GET',
+        'path': '/',
+        'query_string': b'',
+        'headers': [],
+    }
+    
+    # Call the metrics app directly
+    response_started = False
+    status_code = 200
+    headers = []
+    body_parts = []
+    
+    async def receive():
+        return {'type': 'http.request', 'body': b''}
+    
+    async def send(message):
+        nonlocal response_started, status_code, headers, body_parts
+        if message['type'] == 'http.response.start':
+            response_started = True
+            status_code = message['status']
+            headers = message.get('headers', [])
+        elif message['type'] == 'http.response.body':
+            body_parts.append(message.get('body', b''))
+    
+    await metrics_app(scope, receive, send)
+    
+    # Combine body parts
+    body = b''.join(body_parts)
+    
+    # Convert headers to the format FastAPI expects
+    response_headers = {}
+    for header_pair in headers:
+        if len(header_pair) == 2:
+            key, value = header_pair
+            if isinstance(key, bytes):
+                key = key.decode('utf-8')
+            if isinstance(value, bytes):
+                value = value.decode('utf-8')
+            response_headers[key] = value
+    
+    return Response(content=body, status_code=status_code, headers=response_headers)
 
 # Configure CORS to allow all origins
 app.add_middleware(
