@@ -26,6 +26,10 @@ spec:
               value: "mongodb://globeco-portfolio-service-mongodb:27017"
             - name: OTEL_METRICS_LOGGING_ENABLED
               value: "true"
+            - name: ENABLE_METRICS
+              value: "true"
+            - name: METRICS_DEBUG_LOGGING
+              value: "false"
           resources:
             requests:
               cpu: "200m"
