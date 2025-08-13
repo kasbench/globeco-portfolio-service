@@ -1676,3 +1676,400 @@ class TestRoutePatternIntegration:
             request.url.path = input_path
             result = _extract_route_pattern(request)
             assert result == expected_pattern, f"Failed for path {input_path}: expected {expected_pattern}, got {result}"
+
+
+class TestLabelFormatting:
+    """Test label formatting and validation methods."""
+    
+    def test_get_method_label_valid_methods(self):
+        """Test formatting of valid HTTP methods."""
+        from app.monitoring import _get_method_label
+        
+        # Test standard HTTP methods
+        assert _get_method_label("get") == "GET"
+        assert _get_method_label("GET") == "GET"
+        assert _get_method_label("post") == "POST"
+        assert _get_method_label("POST") == "POST"
+        assert _get_method_label("put") == "PUT"
+        assert _get_method_label("PUT") == "PUT"
+        assert _get_method_label("delete") == "DELETE"
+        assert _get_method_label("DELETE") == "DELETE"
+        assert _get_method_label("patch") == "PATCH"
+        assert _get_method_label("PATCH") == "PATCH"
+        assert _get_method_label("head") == "HEAD"
+        assert _get_method_label("HEAD") == "HEAD"
+        assert _get_method_label("options") == "OPTIONS"
+        assert _get_method_label("OPTIONS") == "OPTIONS"
+        assert _get_method_label("trace") == "TRACE"
+        assert _get_method_label("TRACE") == "TRACE"
+        assert _get_method_label("connect") == "CONNECT"
+        assert _get_method_label("CONNECT") == "CONNECT"
+    
+    def test_get_method_label_mixed_case(self):
+        """Test formatting of mixed case HTTP methods."""
+        from app.monitoring import _get_method_label
+        
+        assert _get_method_label("Get") == "GET"
+        assert _get_method_label("pOsT") == "POST"
+        assert _get_method_label("PuT") == "PUT"
+        assert _get_method_label("dElEtE") == "DELETE"
+        assert _get_method_label("pAtCh") == "PATCH"
+    
+    def test_get_method_label_with_whitespace(self):
+        """Test formatting of HTTP methods with whitespace."""
+        from app.monitoring import _get_method_label
+        
+        assert _get_method_label(" get ") == "GET"
+        assert _get_method_label("\tpost\t") == "POST"
+        assert _get_method_label("\nput\n") == "PUT"
+        assert _get_method_label("  delete  ") == "DELETE"
+    
+    def test_get_method_label_unknown_methods(self):
+        """Test formatting of unknown HTTP methods."""
+        from app.monitoring import _get_method_label
+        
+        # Unknown methods should still be returned uppercase
+        assert _get_method_label("custom") == "CUSTOM"
+        assert _get_method_label("UNKNOWN_METHOD") == "UNKNOWN_METHOD"
+        assert _get_method_label("xyz") == "XYZ"
+    
+    def test_get_method_label_invalid_input(self):
+        """Test handling of invalid input types."""
+        from app.monitoring import _get_method_label
+        
+        # Non-string inputs should return "UNKNOWN"
+        assert _get_method_label(None) == "UNKNOWN"
+        assert _get_method_label(123) == "UNKNOWN"
+        assert _get_method_label([]) == "UNKNOWN"
+        assert _get_method_label({}) == "UNKNOWN"
+        assert _get_method_label(True) == "UNKNOWN"
+    
+    def test_get_method_label_empty_string(self):
+        """Test handling of empty strings."""
+        from app.monitoring import _get_method_label
+        
+        assert _get_method_label("") == "UNKNOWN"
+        assert _get_method_label("   ") == "UNKNOWN"  # Only whitespace
+        assert _get_method_label("\t\n") == "UNKNOWN"  # Only whitespace chars
+    
+    @patch('app.monitoring.logger')
+    def test_get_method_label_logging(self, mock_logger):
+        """Test logging behavior for method label formatting."""
+        from app.monitoring import _get_method_label
+        
+        # Test warning for invalid type
+        _get_method_label(123)
+        mock_logger.warning.assert_called()
+        
+        # Test warning for empty string
+        mock_logger.reset_mock()
+        _get_method_label("")
+        mock_logger.warning.assert_called()
+        
+        # Test debug for unknown method
+        mock_logger.reset_mock()
+        _get_method_label("CUSTOM_METHOD")
+        mock_logger.debug.assert_called()
+    
+    def test_get_method_label_exception_handling(self):
+        """Test exception handling in method label formatting."""
+        from app.monitoring import _get_method_label
+        
+        # Create a mock object that raises exception on string operations
+        class BadString:
+            def strip(self):
+                raise Exception("Test exception")
+            def upper(self):
+                raise Exception("Test exception")
+            def __str__(self):
+                return "bad_string"
+        
+        bad_input = BadString()
+        result = _get_method_label(bad_input)
+        assert result == "UNKNOWN"
+    
+    def test_format_status_code_valid_codes(self):
+        """Test formatting of valid HTTP status codes."""
+        from app.monitoring import _format_status_code
+        
+        # Test common status codes
+        assert _format_status_code(200) == "200"
+        assert _format_status_code(201) == "201"
+        assert _format_status_code(400) == "400"
+        assert _format_status_code(401) == "401"
+        assert _format_status_code(403) == "403"
+        assert _format_status_code(404) == "404"
+        assert _format_status_code(500) == "500"
+        assert _format_status_code(502) == "502"
+        assert _format_status_code(503) == "503"
+    
+    def test_format_status_code_boundary_values(self):
+        """Test formatting of boundary HTTP status codes."""
+        from app.monitoring import _format_status_code
+        
+        # Test boundary values
+        assert _format_status_code(100) == "100"  # Minimum valid
+        assert _format_status_code(599) == "599"  # Maximum valid
+        
+        # Test just outside boundaries
+        assert _format_status_code(99) == "unknown"   # Below minimum
+        assert _format_status_code(600) == "unknown"  # Above maximum
+    
+    def test_format_status_code_invalid_range(self):
+        """Test formatting of status codes outside valid range."""
+        from app.monitoring import _format_status_code
+        
+        # Test invalid ranges
+        assert _format_status_code(0) == "unknown"
+        assert _format_status_code(-1) == "unknown"
+        assert _format_status_code(50) == "unknown"
+        assert _format_status_code(700) == "unknown"
+        assert _format_status_code(1000) == "unknown"
+    
+    def test_format_status_code_invalid_types(self):
+        """Test handling of invalid input types."""
+        from app.monitoring import _format_status_code
+        
+        # Non-integer inputs should return "unknown"
+        assert _format_status_code(None) == "unknown"
+        assert _format_status_code("200") == "unknown"  # String
+        assert _format_status_code(200.5) == "unknown"  # Float
+        assert _format_status_code([]) == "unknown"     # List
+        assert _format_status_code({}) == "unknown"     # Dict
+        assert _format_status_code(True) == "unknown"   # Boolean
+    
+    def test_format_status_code_edge_cases(self):
+        """Test edge cases for status code formatting."""
+        from app.monitoring import _format_status_code
+        
+        # Test edge cases within valid range
+        assert _format_status_code(101) == "101"
+        assert _format_status_code(199) == "199"
+        assert _format_status_code(300) == "300"
+        assert _format_status_code(399) == "399"
+        assert _format_status_code(400) == "400"
+        assert _format_status_code(499) == "499"
+        assert _format_status_code(500) == "500"
+        assert _format_status_code(598) == "598"
+    
+    @patch('app.monitoring.logger')
+    def test_format_status_code_logging(self, mock_logger):
+        """Test logging behavior for status code formatting."""
+        from app.monitoring import _format_status_code
+        
+        # Test warning for invalid type
+        _format_status_code("200")
+        mock_logger.warning.assert_called()
+        
+        # Test warning for out of range
+        mock_logger.reset_mock()
+        _format_status_code(99)
+        mock_logger.warning.assert_called()
+        
+        mock_logger.reset_mock()
+        _format_status_code(600)
+        mock_logger.warning.assert_called()
+    
+    def test_format_status_code_exception_handling(self):
+        """Test exception handling in status code formatting."""
+        from app.monitoring import _format_status_code
+        
+        # Create a mock object that raises exception on comparison
+        class BadInt:
+            def __init__(self, value):
+                self.value = value
+            
+            def __lt__(self, other):
+                raise Exception("Test exception")
+            
+            def __gt__(self, other):
+                raise Exception("Test exception")
+            
+            def __str__(self):
+                return str(self.value)
+        
+        bad_input = BadInt(200)
+        result = _format_status_code(bad_input)
+        assert result == "unknown"
+
+
+class TestLabelFormattingIntegration:
+    """Integration tests for label formatting methods."""
+    
+    def test_method_and_status_formatting_together(self):
+        """Test method and status code formatting work together."""
+        from app.monitoring import _get_method_label, _format_status_code
+        
+        # Test typical combinations
+        method = _get_method_label("get")
+        status = _format_status_code(200)
+        assert method == "GET"
+        assert status == "200"
+        
+        method = _get_method_label("POST")
+        status = _format_status_code(201)
+        assert method == "POST"
+        assert status == "201"
+        
+        method = _get_method_label("delete")
+        status = _format_status_code(404)
+        assert method == "DELETE"
+        assert status == "404"
+    
+    def test_error_handling_consistency(self):
+        """Test that both methods handle errors consistently."""
+        from app.monitoring import _get_method_label, _format_status_code
+        
+        # Both should handle None gracefully
+        assert _get_method_label(None) == "UNKNOWN"
+        assert _format_status_code(None) == "unknown"
+        
+        # Both should handle invalid types gracefully
+        assert _get_method_label(123) == "UNKNOWN"
+        assert _format_status_code("123") == "unknown"
+    
+    def test_label_formatting_with_real_values(self):
+        """Test label formatting with realistic HTTP values."""
+        from app.monitoring import _get_method_label, _format_status_code
+        
+        # Test realistic scenarios
+        test_cases = [
+            ("GET", 200, "GET", "200"),
+            ("post", 201, "POST", "201"),
+            ("PUT", 204, "PUT", "204"),
+            ("delete", 404, "DELETE", "404"),
+            ("PATCH", 422, "PATCH", "422"),
+            ("options", 200, "OPTIONS", "200"),
+            ("head", 304, "HEAD", "304"),
+        ]
+        
+        for method_input, status_input, expected_method, expected_status in test_cases:
+            method_result = _get_method_label(method_input)
+            status_result = _format_status_code(status_input)
+            
+            assert method_result == expected_method, f"Method {method_input} -> {method_result}, expected {expected_method}"
+            assert status_result == expected_status, f"Status {status_input} -> {status_result}, expected {expected_status}"
+    
+    def test_label_validation_requirements_compliance(self):
+        """Test that label formatting meets the requirements."""
+        from app.monitoring import _get_method_label, _format_status_code
+        
+        # Requirement 2.1: Use uppercase HTTP method names
+        methods = ["get", "post", "put", "delete", "patch", "head", "options"]
+        for method in methods:
+            result = _get_method_label(method)
+            assert result == method.upper(), f"Method {method} should be uppercase"
+            assert result.isupper(), f"Method result {result} should be uppercase"
+        
+        # Requirement 2.3: Convert numeric HTTP status codes to strings
+        status_codes = [200, 201, 400, 401, 404, 500, 502, 503]
+        for status in status_codes:
+            result = _format_status_code(status)
+            assert isinstance(result, str), f"Status {status} should return string"
+            assert result == str(status), f"Status {status} should convert to string"
+        
+        # Requirement 5.4: Fallback to safe defaults for invalid inputs
+        assert _get_method_label(None) == "UNKNOWN"
+        assert _get_method_label("") == "UNKNOWN"
+        assert _format_status_code(None) == "unknown"
+        assert _format_status_code(99) == "unknown"  # Out of range
+        assert _format_status_code(600) == "unknown"  # Out of range
+
+
+class TestLabelFormattingEdgeCases:
+    """Test edge cases and error conditions for label formatting."""
+    
+    def test_method_label_unicode_handling(self):
+        """Test method label formatting with unicode characters."""
+        from app.monitoring import _get_method_label
+        
+        # Unicode characters should be handled gracefully
+        assert _get_method_label("gét") == "GÉT"  # Accented characters
+        assert _get_method_label("pøst") == "PØST"  # Nordic characters
+        assert _get_method_label("测试") == "测试"  # Chinese characters
+    
+    def test_method_label_very_long_strings(self):
+        """Test method label formatting with very long strings."""
+        from app.monitoring import _get_method_label
+        
+        # Very long method names should still be processed
+        long_method = "a" * 1000
+        result = _get_method_label(long_method)
+        assert result == "A" * 1000
+    
+    def test_status_code_extreme_values(self):
+        """Test status code formatting with extreme values."""
+        from app.monitoring import _format_status_code
+        
+        # Test very large numbers
+        assert _format_status_code(999999) == "unknown"
+        assert _format_status_code(-999999) == "unknown"
+        
+        # Test maximum/minimum integer values
+        import sys
+        assert _format_status_code(sys.maxsize) == "unknown"
+        assert _format_status_code(-sys.maxsize) == "unknown"
+    
+    def test_concurrent_label_formatting(self):
+        """Test that label formatting is thread-safe."""
+        import threading
+        import time
+        from app.monitoring import _get_method_label, _format_status_code
+        
+        results = []
+        errors = []
+        
+        def format_labels():
+            try:
+                for i in range(100):
+                    method = _get_method_label("get")
+                    status = _format_status_code(200)
+                    results.append((method, status))
+                    time.sleep(0.001)  # Small delay to encourage race conditions
+            except Exception as e:
+                errors.append(e)
+        
+        # Run multiple threads
+        threads = []
+        for _ in range(5):
+            thread = threading.Thread(target=format_labels)
+            threads.append(thread)
+            thread.start()
+        
+        # Wait for all threads to complete
+        for thread in threads:
+            thread.join()
+        
+        # Verify no errors occurred
+        assert len(errors) == 0, f"Errors occurred during concurrent execution: {errors}"
+        
+        # Verify all results are correct
+        assert len(results) == 500  # 5 threads * 100 iterations
+        for method, status in results:
+            assert method == "GET"
+            assert status == "200"
+    
+    def test_memory_usage_with_many_calls(self):
+        """Test that repeated label formatting doesn't cause memory leaks."""
+        from app.monitoring import _get_method_label, _format_status_code
+        
+        # Make many calls to ensure no memory accumulation
+        for i in range(10000):
+            method = _get_method_label("get")
+            status = _format_status_code(200)
+            assert method == "GET"
+            assert status == "200"
+        
+        # Test with varying inputs
+        methods = ["get", "post", "put", "delete", "patch"]
+        statuses = [200, 201, 400, 404, 500]
+        
+        for i in range(1000):
+            method_input = methods[i % len(methods)]
+            status_input = statuses[i % len(statuses)]
+            
+            method = _get_method_label(method_input)
+            status = _format_status_code(status_input)
+            
+            assert method == method_input.upper()
+            assert status == str(status_input)

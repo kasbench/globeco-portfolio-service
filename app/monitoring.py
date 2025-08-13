@@ -561,6 +561,111 @@ def _is_alphanumeric_id(part: str) -> bool:
     return True
 
 
+def _get_method_label(method: str) -> str:
+    """
+    Format HTTP method as uppercase string for consistent labeling.
+    
+    Converts HTTP method names to uppercase and validates against known methods.
+    Falls back to safe defaults for invalid or unknown methods.
+    
+    Args:
+        method: HTTP method string (e.g., 'get', 'POST', 'Put')
+        
+    Returns:
+        Uppercase HTTP method string or 'UNKNOWN' for invalid methods
+    """
+    try:
+        # Handle None or non-string input
+        if not isinstance(method, str):
+            logger.warning(
+                "Invalid method type for label formatting",
+                method=method,
+                method_type=type(method).__name__
+            )
+            return "UNKNOWN"
+        
+        # Strip whitespace and convert to uppercase
+        method_upper = method.strip().upper()
+        
+        # Handle empty string after stripping
+        if not method_upper:
+            logger.warning("Empty method string after stripping whitespace")
+            return "UNKNOWN"
+        
+        # Define valid HTTP methods according to RFC 7231 and common extensions
+        valid_methods = {
+            "GET", "POST", "PUT", "DELETE", "PATCH",
+            "HEAD", "OPTIONS", "TRACE", "CONNECT"
+        }
+        
+        # Log warning for unknown methods but still return them
+        # This allows for custom methods while maintaining visibility
+        if method_upper not in valid_methods:
+            logger.debug(
+                "Unknown HTTP method encountered",
+                method=method,
+                method_upper=method_upper
+            )
+        
+        return method_upper
+        
+    except Exception as e:
+        logger.error(
+            "Failed to format method label",
+            error=str(e),
+            error_type=type(e).__name__,
+            method=method,
+            exc_info=True
+        )
+        return "UNKNOWN"
+
+
+def _format_status_code(status_code: int) -> str:
+    """
+    Format HTTP status code as string for consistent labeling.
+    
+    Converts numeric HTTP status codes to strings and validates they are
+    within the valid HTTP status code range (100-599).
+    
+    Args:
+        status_code: HTTP status code integer (e.g., 200, 404, 500)
+        
+    Returns:
+        Status code as string or 'unknown' for invalid codes
+    """
+    try:
+        # Handle None or non-integer input
+        if not isinstance(status_code, int):
+            logger.warning(
+                "Invalid status code type for label formatting",
+                status_code=status_code,
+                status_code_type=type(status_code).__name__
+            )
+            return "unknown"
+        
+        # Validate status code is within valid HTTP range
+        # HTTP status codes are defined as 100-599 in RFC 7231
+        if status_code < 100 or status_code > 599:
+            logger.warning(
+                "Status code out of valid HTTP range (100-599)",
+                status_code=status_code
+            )
+            return "unknown"
+        
+        # Convert to string for consistent labeling
+        return str(status_code)
+        
+    except Exception as e:
+        logger.error(
+            "Failed to format status code label",
+            error=str(e),
+            error_type=type(e).__name__,
+            status_code=status_code,
+            exc_info=True
+        )
+        return "unknown"
+
+
 # Initialize metrics on module import
 logger.info("Enhanced HTTP metrics monitoring module initialized")
 logger.info(f"Metrics registry contains {len(_METRICS_REGISTRY)} metrics")
