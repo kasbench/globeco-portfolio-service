@@ -123,6 +123,17 @@ app = FastAPI(lifespan=lifespan)
 # Add structured logging middleware (before other middleware)
 app.add_middleware(LoggingMiddleware, logger=logger)
 
+# Add enhanced HTTP metrics middleware if enabled
+if settings.enable_metrics:
+    from app.monitoring import EnhancedHTTPMetricsMiddleware
+    app.add_middleware(
+        EnhancedHTTPMetricsMiddleware, 
+        debug_logging=settings.metrics_debug_logging
+    )
+    logger.info("Enhanced HTTP metrics middleware enabled")
+else:
+    logger.info("Enhanced HTTP metrics middleware disabled")
+
 # Instrument FastAPI app
 FastAPIInstrumentor().instrument_app(app)
 
