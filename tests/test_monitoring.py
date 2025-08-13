@@ -2519,6 +2519,117 @@ class TestEnhancedHTTPMetricsMiddleware:
                              "Successfully recorded HTTP" in str(call)]
             assert len(debug_calls) >= 3  # Initial recording + 2 success logs
     
+    def test_record_metrics_both_counter_and_histogram_errors(self, middleware):
+        """Test _record_metrics method with both counter and histogram recording errors."""
+        with patch('app.monitoring.HTTP_REQUESTS_TOTAL') as mock_counter, \
+             patch('app.monitoring.HTTP_REQUEST_DURATION') as mock_histogram, \
+             patch('app.monitoring.logger') as mock_logger:
+            
+            mock_labeled_counter = Mock()
+            mock_labeled_histogram = Mock()
+            mock_counter.labels.return_value = mock_labeled_counter
+            mock_histogram.labels.return_value = mock_labeled_histogram
+            
+            # Make both operations fail
+            mock_labeled_counter.inc.side_effect = Exception("Counter error")
+            mock_labeled_histogram.observe.side_effect = Exception("Histogram error")
+            
+            # Call _record_metrics - should not raise exception
+            middleware._record_metrics("GET", "/api/v1/portfolios", "200", 150.5)
+            
+            # Verify both operations were attempted
+            mock_labeled_counter.inc.assert_called_once()
+            mock_labeled_histogram.observe.assert_called_once_with(150.5)
+            
+            # Verify both errors were logged
+            error_calls = [call for call in mock_logger.error.call_args_list 
+                          if "Failed to record HTTP" in str(call)]
+            assert len(error_calls) == 2  # One for counter, one for histogram
+            
+            # Verify specific error messages
+            counter_error_calls = [call for call in mock_logger.error.call_args_list 
+                                  if "Failed to record HTTP requests total counter" in str(call)]
+            histogram_error_calls = [call for call in mock_logger.error.call_args_list 
+                                    if "Failed to record HTTP request duration histogram" in str(call)]
+            assert len(counter_error_calls) == 1
+            assert len(histogram_error_calls) == 1
+    
+    def test_record_metrics_labels_method_error(self, middleware):
+        """Test _record_metrics method when labels() method fails."""
+        with patch('app.monitoring.HTTP_REQUESTS_TOTAL') as mock_counter, \
+             patch('app.monitoring.HTTP_REQUEST_DURATION') as mock_histogram, \
+             patch('app.monitoring.logger') as mock_logger:
+            
+            # Make labels() method fail for counter
+            mock_counter.labels.side_effect = Exception("Labels error")
+            mock_histogram.labels.return_value = Mock()
+            
+            # Call _record_metrics - should not raise exception
+            middleware._record_metrics("GET", "/api/v1/portfolios", "200", 150.5)
+            
+            # Verify counter labels was attempted
+            mock_counter.labels.assert_called_once_with(
+                method="GET", path="/api/v1/portfolios", status="200"
+            )
+            
+            # Verify histogram was still attempted (should succeed)
+            mock_histogram.labels.assert_called_once_with(
+                method="GET", path="/api/v1/portfolios", status="200"
+            )
+            
+            # Verify error was logged for counter
+            error_calls = [call for call in mock_logger.error.call_args_list 
+                          if "Failed to record HTTP requests total counter" in str(call)]
+            assert len(error_calls) == 1
+    
+    def test_record_metrics_with_none_values(self, middleware):
+        """Test _record_metrics method with None values."""
+        with patch('app.monitoring.HTTP_REQUESTS_TOTAL') as mock_counter, \
+             patch('app.monitoring.HTTP_REQUEST_DURATION') as mock_histogram, \
+             patch('app.monitoring.logger') as mock_logger:
+            
+            mock_labeled_counter = Mock()
+            mock_labeled_histogram = Mock()
+            mock_counter.labels.return_value = mock_labeled_counter
+            mock_histogram.labels.return_value = mock_labeled_histogram
+            
+            # Call _record_metrics with None values - should handle gracefully
+            middleware._record_metrics(None, None, None, None)
+            
+            # Verify operations were attempted with None values
+            mock_counter.labels.assert_called_once_with(method=None, path=None, status=None)
+            mock_labeled_counter.inc.assert_called_once()
+            mock_histogram.labels.assert_called_once_with(method=None, path=None, status=None)
+            mock_labeled_histogram.observe.assert_called_once_with(None)
+    
+    def test_record_metrics_with_extreme_duration_values(self, middleware):
+        """Test _record_metrics method with extreme duration values."""
+        with patch('app.monitoring.HTTP_REQUESTS_TOTAL') as mock_counter, \
+             patch('app.monitoring.HTTP_REQUEST_DURATION') as mock_histogram:
+            
+            mock_labeled_counter = Mock()
+            mock_labeled_histogram = Mock()
+            mock_counter.labels.return_value = mock_labeled_counter
+            mock_histogram.labels.return_value = mock_labeled_histogram
+            
+            # Test with very large duration
+            middleware._record_metrics("GET", "/api/v1/portfolios", "200", 999999.99)
+            mock_labeled_histogram.observe.assert_called_with(999999.99)
+            
+            # Reset mocks
+            mock_labeled_histogram.reset_mock()
+            
+            # Test with zero duration
+            middleware._record_metrics("GET", "/api/v1/portfolios", "200", 0.0)
+            mock_labeled_histogram.observe.assert_called_with(0.0)
+            
+            # Reset mocks
+            mock_labeled_histogram.reset_mock()
+            
+            # Test with negative duration (edge case)
+            middleware._record_metrics("GET", "/api/v1/portfolios", "200", -1.0)
+            mock_labeled_histogram.observe.assert_called_with(-1.0)
+    
     @pytest.mark.asyncio
     async def test_middleware_with_different_request_methods(self, middleware):
         """Test middleware with different HTTP methods."""
