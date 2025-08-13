@@ -313,6 +313,12 @@ def _sanitize_unmatched_route(path: str) -> str:
     This method handles routes that don't match the known portfolio service patterns
     by parameterizing ID-like path segments to prevent metric explosion.
     
+    The function detects and parameterizes various ID formats:
+    - MongoDB ObjectIds (24-char hex) -> {id}
+    - UUIDs (with/without hyphens) -> {id}
+    - Numeric IDs -> {id}
+    - Long alphanumeric identifiers -> {id}
+    
     Args:
         path: URL path string
         
@@ -325,22 +331,50 @@ def _sanitize_unmatched_route(path: str) -> str:
         
         for part in parts:
             if not part:
+                # Keep empty parts (for leading/trailing slashes)
                 sanitized_parts.append(part)
                 continue
             
             # Check if part looks like an ID that should be parameterized
             if _looks_like_id(part):
                 sanitized_parts.append("{id}")
+                logger.debug(
+                    "Parameterized ID in unmatched route",
+                    original_part=part,
+                    path=path
+                )
             else:
                 # Keep the original part but limit length to prevent abuse
                 sanitized_part = part[:50] if len(part) > 50 else part
                 sanitized_parts.append(sanitized_part)
+                
+                # Log if we truncated a long part
+                if len(part) > 50:
+                    logger.debug(
+                        "Truncated long path segment in unmatched route",
+                        original_length=len(part),
+                        truncated_part=sanitized_part,
+                        path=path
+                    )
         
         result = "/".join(sanitized_parts)
         
         # Ensure we don't create overly long patterns
         if len(result) > 200:
+            logger.warning(
+                "Route pattern too long after sanitization, using fallback",
+                original_path=path,
+                sanitized_length=len(result)
+            )
             return "/unknown"
+        
+        # Log the sanitization result for debugging
+        if result != path:
+            logger.debug(
+                "Sanitized unmatched route",
+                original_path=path,
+                sanitized_pattern=result
+            )
         
         return result
         
@@ -348,6 +382,7 @@ def _sanitize_unmatched_route(path: str) -> str:
         logger.error(
             "Failed to sanitize unmatched route",
             error=str(e),
+            error_type=type(e).__name__,
             path=path,
             exc_info=True
         )
@@ -376,39 +411,23 @@ def _looks_like_id(part: str) -> bool:
             return False
         
         # MongoDB ObjectId (exactly 24 character hex)
-        if len(part) == 24 and all(c in '0123456789abcdefABCDEF' for c in part):
+        if _is_mongodb_objectid(part):
             return True
         
         # UUID format (with hyphens: exactly 8-4-4-4-12 format)
-        if len(part) == 36 and part.count('-') == 4:
-            uuid_parts = part.split('-')
-            if (len(uuid_parts) == 5 and 
-                len(uuid_parts[0]) == 8 and len(uuid_parts[1]) == 4 and 
-                len(uuid_parts[2]) == 4 and len(uuid_parts[3]) == 4 and 
-                len(uuid_parts[4]) == 12):
-                # Check if all parts are hexadecimal
-                try:
-                    for uuid_part in uuid_parts:
-                        int(uuid_part, 16)
-                    return True
-                except ValueError:
-                    return False
+        if _is_uuid_with_hyphens(part):
+            return True
         
         # UUID format (without hyphens: exactly 32 character hex)
-        if len(part) == 32 and all(c in '0123456789abcdefABCDEF' for c in part):
+        if _is_uuid_without_hyphens(part):
             return True
         
         # Numeric ID (pure digits)
-        if part.isdigit() and len(part) >= 1:
+        if _is_numeric_id(part):
             return True
         
         # Long alphanumeric ID that looks like an identifier
-        # Only consider if it doesn't match the specific formats above
-        if (len(part) > 8 and 
-            part.replace('-', '').replace('_', '').isalnum() and
-            not part.isalpha() and  # Must contain at least one non-letter
-            # Exclude strings that look like malformed hex IDs (close to ObjectId/UUID length)
-            not (20 <= len(part) <= 40)):
+        if _is_alphanumeric_id(part):
             return True
         
         return False
@@ -416,6 +435,130 @@ def _looks_like_id(part: str) -> bool:
     except Exception:
         # If any error occurs during ID detection, err on the side of caution
         return False
+
+
+def _is_mongodb_objectid(part: str) -> bool:
+    """
+    Check if a path part is a MongoDB ObjectId.
+    
+    MongoDB ObjectIds are exactly 24 characters long and contain only hexadecimal characters.
+    
+    Args:
+        part: Path segment to check
+        
+    Returns:
+        True if the part looks like a MongoDB ObjectId
+    """
+    if len(part) != 24:
+        return False
+    
+    return all(c in '0123456789abcdefABCDEF' for c in part)
+
+
+def _is_uuid_with_hyphens(part: str) -> bool:
+    """
+    Check if a path part is a UUID with hyphens.
+    
+    Standard UUID format: 8-4-4-4-12 hexadecimal characters separated by hyphens.
+    Example: 550e8400-e29b-41d4-a716-446655440000
+    
+    Args:
+        part: Path segment to check
+        
+    Returns:
+        True if the part looks like a UUID with hyphens
+    """
+    if len(part) != 36 or part.count('-') != 4:
+        return False
+    
+    uuid_parts = part.split('-')
+    if (len(uuid_parts) != 5 or 
+        len(uuid_parts[0]) != 8 or len(uuid_parts[1]) != 4 or 
+        len(uuid_parts[2]) != 4 or len(uuid_parts[3]) != 4 or 
+        len(uuid_parts[4]) != 12):
+        return False
+    
+    # Check if all parts are hexadecimal
+    try:
+        for uuid_part in uuid_parts:
+            int(uuid_part, 16)
+        return True
+    except ValueError:
+        return False
+
+
+def _is_uuid_without_hyphens(part: str) -> bool:
+    """
+    Check if a path part is a UUID without hyphens.
+    
+    UUID without hyphens: exactly 32 hexadecimal characters.
+    Example: 550e8400e29b41d4a716446655440000
+    
+    Args:
+        part: Path segment to check
+        
+    Returns:
+        True if the part looks like a UUID without hyphens
+    """
+    if len(part) != 32:
+        return False
+    
+    return all(c in '0123456789abcdefABCDEF' for c in part)
+
+
+def _is_numeric_id(part: str) -> bool:
+    """
+    Check if a path part is a numeric ID.
+    
+    Numeric IDs are strings containing only digits.
+    Examples: "123", "456789", "1"
+    
+    Args:
+        part: Path segment to check
+        
+    Returns:
+        True if the part looks like a numeric ID
+    """
+    return part.isdigit() and len(part) >= 1
+
+
+def _is_alphanumeric_id(part: str) -> bool:
+    """
+    Check if a path part is a long alphanumeric identifier.
+    
+    Alphanumeric IDs are longer identifiers that contain both letters and numbers,
+    but are not in the specific formats of ObjectId or UUID.
+    
+    Criteria:
+    - Longer than 8 characters
+    - Contains only alphanumeric characters, hyphens, and underscores
+    - Must contain at least one digit (number)
+    - Not in the 20-40 character range (to avoid confusion with malformed ObjectIds/UUIDs)
+    
+    Examples: "user-abc123def", "session_token_xyz789"
+    
+    Args:
+        part: Path segment to check
+        
+    Returns:
+        True if the part looks like an alphanumeric ID
+    """
+    if len(part) <= 8:
+        return False
+    
+    # Must be alphanumeric with allowed separators
+    if not part.replace('-', '').replace('_', '').isalnum():
+        return False
+    
+    # Must contain at least one digit (not just letters and separators)
+    if not any(c.isdigit() for c in part):
+        return False
+    
+    # Exclude strings that might be malformed hex IDs (close to ObjectId/UUID length)
+    if 20 <= len(part) <= 40:
+        return False
+    
+    return True
 
 
 # Initialize metrics on module import

@@ -35,7 +35,7 @@
   - Review #[[file:documentation/http-metrics-implementation-guide-python.md]] for consistency.
   - _Requirements: 2.2, 2.5, 2.6_
 
-- [ ] 5. Implement ID detection and sanitization logic
+- [x] 5. Implement ID detection and sanitization logic
   - Create `_looks_like_id()` method to detect MongoDB ObjectIds (24-char hex)
   - Add UUID detection (with and without hyphens)
   - Add numeric ID detection

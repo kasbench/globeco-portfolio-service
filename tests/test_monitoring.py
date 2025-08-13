@@ -766,6 +766,410 @@ class TestPortfolioV1RoutePatterns:
         assert result == "/api/v1/portfolio/{portfolioId}"
 
 
+class TestIDDetection:
+    """Test ID detection and sanitization logic."""
+    
+    def test_is_mongodb_objectid_valid(self):
+        """Test MongoDB ObjectId detection with valid IDs."""
+        from app.monitoring import _is_mongodb_objectid
+        
+        # Valid MongoDB ObjectIds (24-char hex)
+        valid_objectids = [
+            "507f1f77bcf86cd799439011",
+            "507F1F77BCF86CD799439011",  # uppercase
+            "000000000000000000000000",  # all zeros
+            "ffffffffffffffffffffffff",  # all f's
+            "123456789abcdef123456789",  # mixed case
+        ]
+        
+        for objectid in valid_objectids:
+            assert _is_mongodb_objectid(objectid), f"Should detect {objectid} as ObjectId"
+    
+    def test_is_mongodb_objectid_invalid(self):
+        """Test MongoDB ObjectId detection with invalid IDs."""
+        from app.monitoring import _is_mongodb_objectid
+        
+        # Invalid ObjectIds
+        invalid_objectids = [
+            "",  # empty
+            "507f1f77bcf86cd79943901",   # 23 chars (too short)
+            "507f1f77bcf86cd7994390111",  # 25 chars (too long)
+            "507f1f77bcf86cd79943901g",   # contains 'g' (not hex)
+            "507f1f77-bcf8-6cd7-9943-9011",  # contains hyphens
+            "507f1f77 bcf86cd799439011",  # contains space
+            "not-an-objectid-at-all",    # not hex at all
+        ]
+        
+        for objectid in invalid_objectids:
+            assert not _is_mongodb_objectid(objectid), f"Should not detect {objectid} as ObjectId"
+    
+    def test_is_uuid_with_hyphens_valid(self):
+        """Test UUID with hyphens detection with valid UUIDs."""
+        from app.monitoring import _is_uuid_with_hyphens
+        
+        # Valid UUIDs with hyphens
+        valid_uuids = [
+            "550e8400-e29b-41d4-a716-446655440000",
+            "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+            "6ba7b811-9dad-11d1-80b4-00c04fd430c8",
+            "00000000-0000-0000-0000-000000000000",  # nil UUID
+            "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF",  # uppercase
+        ]
+        
+        for uuid in valid_uuids:
+            assert _is_uuid_with_hyphens(uuid), f"Should detect {uuid} as UUID with hyphens"
+    
+    def test_is_uuid_with_hyphens_invalid(self):
+        """Test UUID with hyphens detection with invalid UUIDs."""
+        from app.monitoring import _is_uuid_with_hyphens
+        
+        # Invalid UUIDs
+        invalid_uuids = [
+            "",  # empty
+            "550e8400-e29b-41d4-a716",  # too short
+            "550e8400-e29b-41d4-a716-446655440000-extra",  # too long
+            "550e8400e29b41d4a716446655440000",  # no hyphens
+            "550e8400-e29b-41d4-a716-44665544000g",  # contains 'g'
+            "550e8400-e29b-41d4-a716-4466554400000",  # last part too long
+            "550e8400-e29b-41d4-a7166-446655440000",  # middle part too long
+            "550e8400--e29b-41d4-a716-446655440000",  # double hyphen
+            "not-a-uuid-at-all-here-definitely",  # not hex
+        ]
+        
+        for uuid in invalid_uuids:
+            assert not _is_uuid_with_hyphens(uuid), f"Should not detect {uuid} as UUID with hyphens"
+    
+    def test_is_uuid_without_hyphens_valid(self):
+        """Test UUID without hyphens detection with valid UUIDs."""
+        from app.monitoring import _is_uuid_without_hyphens
+        
+        # Valid UUIDs without hyphens (32-char hex)
+        valid_uuids = [
+            "550e8400e29b41d4a716446655440000",
+            "6ba7b8109dad11d180b400c04fd430c8",
+            "00000000000000000000000000000000",  # nil UUID
+            "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",  # uppercase
+            "123456789abcdef0123456789abcdef0",  # mixed case
+        ]
+        
+        for uuid in valid_uuids:
+            assert _is_uuid_without_hyphens(uuid), f"Should detect {uuid} as UUID without hyphens"
+    
+    def test_is_uuid_without_hyphens_invalid(self):
+        """Test UUID without hyphens detection with invalid UUIDs."""
+        from app.monitoring import _is_uuid_without_hyphens
+        
+        # Invalid UUIDs
+        invalid_uuids = [
+            "",  # empty
+            "550e8400e29b41d4a71644665544000",   # 31 chars (too short)
+            "550e8400e29b41d4a7164466554400000",  # 33 chars (too long)
+            "550e8400e29b41d4a716446655440000g",  # contains 'g'
+            "550e8400-e29b-41d4-a716-446655440000",  # contains hyphens
+            "not-a-uuid-without-hyphens-here",   # not hex
+        ]
+        
+        for uuid in invalid_uuids:
+            assert not _is_uuid_without_hyphens(uuid), f"Should not detect {uuid} as UUID without hyphens"
+    
+    def test_is_numeric_id_valid(self):
+        """Test numeric ID detection with valid numeric IDs."""
+        from app.monitoring import _is_numeric_id
+        
+        # Valid numeric IDs
+        valid_numeric_ids = [
+            "1",
+            "123",
+            "456789",
+            "1234567890",
+            "0",  # single zero
+            "000123",  # leading zeros
+        ]
+        
+        for numeric_id in valid_numeric_ids:
+            assert _is_numeric_id(numeric_id), f"Should detect {numeric_id} as numeric ID"
+    
+    def test_is_numeric_id_invalid(self):
+        """Test numeric ID detection with invalid numeric IDs."""
+        from app.monitoring import _is_numeric_id
+        
+        # Invalid numeric IDs
+        invalid_numeric_ids = [
+            "",  # empty
+            "abc",  # letters
+            "123abc",  # mixed
+            "12.34",  # decimal
+            "12-34",  # hyphen
+            "12_34",  # underscore
+            " 123 ",  # spaces
+            "+123",  # plus sign
+            "-123",  # minus sign
+        ]
+        
+        for numeric_id in invalid_numeric_ids:
+            assert not _is_numeric_id(numeric_id), f"Should not detect {numeric_id} as numeric ID"
+    
+    def test_is_alphanumeric_id_valid(self):
+        """Test alphanumeric ID detection with valid alphanumeric IDs."""
+        from app.monitoring import _is_alphanumeric_id
+        
+        # Valid alphanumeric IDs
+        valid_alphanumeric_ids = [
+            "user-abc123def",  # contains hyphen and numbers
+            "session_token_xyz789",  # contains underscore and numbers
+            "auth123token456",  # mixed letters and numbers
+            "very-long-identifier-with-numbers-123",  # long with hyphens
+            "another_long_id_456_here",  # long with underscores
+            "mixedCase123ID",  # mixed case with numbers
+        ]
+        
+        for alphanumeric_id in valid_alphanumeric_ids:
+            assert _is_alphanumeric_id(alphanumeric_id), f"Should detect {alphanumeric_id} as alphanumeric ID"
+    
+    def test_is_alphanumeric_id_invalid(self):
+        """Test alphanumeric ID detection with invalid alphanumeric IDs."""
+        from app.monitoring import _is_alphanumeric_id
+        
+        # Invalid alphanumeric IDs
+        invalid_alphanumeric_ids = [
+            "",  # empty
+            "short",  # too short (8 chars or less)
+            "12345678",  # exactly 8 chars
+            "onlyletters",  # only letters, no numbers/separators
+            "only-letters-here",  # only letters with separators
+            "has spaces in it 123",  # contains spaces
+            "has@special#chars123",  # contains special chars
+            "exactly20charslong12",  # 20 chars (in exclusion range)
+            "this-is-exactly-30-chars-long",  # 30 chars (in exclusion range)
+            "this-is-exactly-40-characters-long-id",  # 40 chars (in exclusion range)
+        ]
+        
+        for alphanumeric_id in invalid_alphanumeric_ids:
+            assert not _is_alphanumeric_id(alphanumeric_id), f"Should not detect {alphanumeric_id} as alphanumeric ID"
+    
+    def test_looks_like_id_comprehensive(self):
+        """Test comprehensive ID detection with various formats."""
+        from app.monitoring import _looks_like_id
+        
+        # Should be detected as IDs
+        should_be_ids = [
+            # MongoDB ObjectIds
+            "507f1f77bcf86cd799439011",
+            "507F1F77BCF86CD799439011",
+            
+            # UUIDs with hyphens
+            "550e8400-e29b-41d4-a716-446655440000",
+            "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+            
+            # UUIDs without hyphens
+            "550e8400e29b41d4a716446655440000",
+            "6ba7b8109dad11d180b400c04fd430c8",
+            
+            # Numeric IDs
+            "1",
+            "123",
+            "456789",
+            "1234567890",
+            
+            # Alphanumeric IDs
+            "user-abc123def",
+            "session_token_xyz789",
+            "auth123token456",
+        ]
+        
+        for id_value in should_be_ids:
+            assert _looks_like_id(id_value), f"Should detect {id_value} as ID"
+        
+        # Should NOT be detected as IDs
+        should_not_be_ids = [
+            "",  # empty
+            "api",  # short word
+            "v1",  # version
+            "portfolios",  # resource name
+            "health",  # endpoint name
+            "metrics",  # endpoint name
+            "search",  # action name
+            "onlyletters",  # only letters
+            "has spaces",  # contains spaces
+            "has@special#chars",  # special characters
+            "exactly20charslong12",  # in exclusion range
+        ]
+        
+        for non_id_value in should_not_be_ids:
+            assert not _looks_like_id(non_id_value), f"Should not detect {non_id_value} as ID"
+    
+    def test_looks_like_id_edge_cases(self):
+        """Test ID detection with edge cases."""
+        from app.monitoring import _looks_like_id
+        
+        # Edge cases that should return False
+        edge_cases = [
+            None,  # None value - should be handled gracefully
+            123,   # Non-string type - should be handled gracefully
+        ]
+        
+        for edge_case in edge_cases:
+            # Should not raise exception and should return False
+            try:
+                result = _looks_like_id(edge_case)
+                assert result is False, f"Should return False for edge case {edge_case}"
+            except Exception as e:
+                pytest.fail(f"Should not raise exception for edge case {edge_case}, but got {e}")
+
+
+class TestSanitizeUnmatchedRoute:
+    """Test route sanitization with ID parameterization."""
+    
+    def test_sanitize_unmatched_route_with_objectid(self):
+        """Test sanitization of routes containing MongoDB ObjectIds."""
+        from app.monitoring import _sanitize_unmatched_route
+        
+        test_cases = [
+            ("/api/v3/users/507f1f77bcf86cd799439011", "/api/v3/users/{id}"),
+            ("/api/v3/users/507f1f77bcf86cd799439011/profile", "/api/v3/users/{id}/profile"),
+            ("/custom/507f1f77bcf86cd799439011/data/507f1f77bcf86cd799439012", "/custom/{id}/data/{id}"),
+        ]
+        
+        for original, expected in test_cases:
+            result = _sanitize_unmatched_route(original)
+            assert result == expected, f"Expected {expected}, got {result} for {original}"
+    
+    def test_sanitize_unmatched_route_with_uuid(self):
+        """Test sanitization of routes containing UUIDs."""
+        from app.monitoring import _sanitize_unmatched_route
+        
+        test_cases = [
+            # UUIDs with hyphens
+            ("/api/v3/orders/550e8400-e29b-41d4-a716-446655440000", "/api/v3/orders/{id}"),
+            ("/api/v3/orders/550e8400-e29b-41d4-a716-446655440000/items", "/api/v3/orders/{id}/items"),
+            
+            # UUIDs without hyphens
+            ("/api/v3/sessions/550e8400e29b41d4a716446655440000", "/api/v3/sessions/{id}"),
+            ("/api/v3/sessions/550e8400e29b41d4a716446655440000/refresh", "/api/v3/sessions/{id}/refresh"),
+        ]
+        
+        for original, expected in test_cases:
+            result = _sanitize_unmatched_route(original)
+            assert result == expected, f"Expected {expected}, got {result} for {original}"
+    
+    def test_sanitize_unmatched_route_with_numeric_id(self):
+        """Test sanitization of routes containing numeric IDs."""
+        from app.monitoring import _sanitize_unmatched_route
+        
+        test_cases = [
+            ("/api/v3/products/12345", "/api/v3/products/{id}"),
+            ("/api/v3/products/12345/reviews", "/api/v3/products/{id}/reviews"),
+            ("/api/v3/categories/1/products/67890", "/api/v3/categories/{id}/products/{id}"),
+        ]
+        
+        for original, expected in test_cases:
+            result = _sanitize_unmatched_route(original)
+            assert result == expected, f"Expected {expected}, got {result} for {original}"
+    
+    def test_sanitize_unmatched_route_with_alphanumeric_id(self):
+        """Test sanitization of routes containing alphanumeric IDs."""
+        from app.monitoring import _sanitize_unmatched_route
+        
+        test_cases = [
+            # Use IDs outside the 20-40 character exclusion range
+            ("/api/v3/tokens/auth123token456789", "/api/v3/tokens/{id}"),  # 19 chars
+            ("/api/v3/sessions/user-abc123def456", "/api/v3/sessions/{id}"),  # 17 chars  
+            ("/api/v3/cache/session_token_xyz789_extra_long_identifier", "/api/v3/cache/{id}"),  # 42 chars
+        ]
+        
+        for original, expected in test_cases:
+            result = _sanitize_unmatched_route(original)
+            assert result == expected, f"Expected {expected}, got {result} for {original}"
+    
+    def test_sanitize_unmatched_route_mixed_ids(self):
+        """Test sanitization of routes with mixed ID types."""
+        from app.monitoring import _sanitize_unmatched_route
+        
+        test_cases = [
+            # ObjectId + UUID
+            ("/api/v3/users/507f1f77bcf86cd799439011/sessions/550e8400-e29b-41d4-a716-446655440000", 
+             "/api/v3/users/{id}/sessions/{id}"),
+            
+            # Numeric + Alphanumeric
+            ("/api/v3/products/12345/reviews/user-abc123def", 
+             "/api/v3/products/{id}/reviews/{id}"),
+            
+            # All types mixed
+            ("/api/v3/users/507f1f77bcf86cd799439011/orders/12345/sessions/auth123token456", 
+             "/api/v3/users/{id}/orders/{id}/sessions/{id}"),
+        ]
+        
+        for original, expected in test_cases:
+            result = _sanitize_unmatched_route(original)
+            assert result == expected, f"Expected {expected}, got {result} for {original}"
+    
+    def test_sanitize_unmatched_route_no_ids(self):
+        """Test sanitization of routes without IDs."""
+        from app.monitoring import _sanitize_unmatched_route
+        
+        test_cases = [
+            ("/api/v3/users", "/api/v3/users"),
+            ("/api/v3/users/search", "/api/v3/users/search"),
+            ("/api/v3/products/categories", "/api/v3/products/categories"),
+            ("/custom/endpoint/action", "/custom/endpoint/action"),
+        ]
+        
+        for original, expected in test_cases:
+            result = _sanitize_unmatched_route(original)
+            assert result == expected, f"Expected {expected}, got {result} for {original}"
+    
+    def test_sanitize_unmatched_route_long_parts(self):
+        """Test sanitization with very long path parts."""
+        from app.monitoring import _sanitize_unmatched_route
+        
+        # Create a very long non-ID part (60 characters)
+        long_part = "a" * 60
+        expected_truncated = "a" * 50  # Should be truncated to 50 chars
+        
+        original = f"/api/v3/endpoint/{long_part}/action"
+        expected = f"/api/v3/endpoint/{expected_truncated}/action"
+        
+        result = _sanitize_unmatched_route(original)
+        assert result == expected, f"Expected {expected}, got {result} for {original}"
+    
+    def test_sanitize_unmatched_route_very_long_result(self):
+        """Test sanitization when result would be too long."""
+        from app.monitoring import _sanitize_unmatched_route
+        
+        # Create a path that would result in > 200 characters after sanitization
+        long_path_parts = [f"part{i}" for i in range(50)]  # 50 parts
+        original = "/" + "/".join(long_path_parts)
+        
+        result = _sanitize_unmatched_route(original)
+        assert result == "/unknown", f"Expected '/unknown' for overly long path, got {result}"
+    
+    def test_sanitize_unmatched_route_empty_and_edge_cases(self):
+        """Test sanitization with empty and edge case paths."""
+        from app.monitoring import _sanitize_unmatched_route
+        
+        test_cases = [
+            ("", ""),  # empty path
+            ("/", "/"),  # root path
+            ("//", "//"),  # double slash
+            ("/api//v3", "/api//v3"),  # empty part in middle
+            ("/api/v3/", "/api/v3/"),  # trailing slash
+        ]
+        
+        for original, expected in test_cases:
+            result = _sanitize_unmatched_route(original)
+            assert result == expected, f"Expected {expected}, got {result} for {original}"
+    
+    def test_sanitize_unmatched_route_exception_handling(self):
+        """Test sanitization exception handling."""
+        from app.monitoring import _sanitize_unmatched_route
+        from unittest.mock import patch
+        
+        # Mock _looks_like_id to raise an exception
+        with patch('app.monitoring._looks_like_id', side_effect=Exception("Test error")):
+            result = _sanitize_unmatched_route("/api/v3/test/123")
+            assert result == "/unknown", f"Expected '/unknown' on exception, got {result}"
+
+
 class TestPortfolioV2RoutePatterns:
     """Test v2 API route pattern extraction."""
     
@@ -794,6 +1198,186 @@ class TestPortfolioV2RoutePatterns:
         request.url.path = "/api/v2/portfolios"
         result = _extract_route_pattern(request)
         assert result == "/api/v2/portfolios"
+
+
+class TestIndividualIDDetectionMethods:
+    """Test individual ID detection helper methods."""
+    
+    def test_is_mongodb_objectid_valid(self):
+        """Test MongoDB ObjectId detection with valid IDs."""
+        from app.monitoring import _is_mongodb_objectid
+        
+        # Valid MongoDB ObjectIds (24-char hex)
+        valid_objectids = [
+            "507f1f77bcf86cd799439011",
+            "507F1F77BCF86CD799439011",  # uppercase
+            "000000000000000000000000",  # all zeros
+            "ffffffffffffffffffffffff",  # all f's
+            "123456789abcdef123456789",  # mixed case
+        ]
+        
+        for objectid in valid_objectids:
+            assert _is_mongodb_objectid(objectid), f"Should detect {objectid} as ObjectId"
+    
+    def test_is_mongodb_objectid_invalid(self):
+        """Test MongoDB ObjectId detection with invalid IDs."""
+        from app.monitoring import _is_mongodb_objectid
+        
+        # Invalid ObjectIds
+        invalid_objectids = [
+            "",  # empty
+            "507f1f77bcf86cd79943901",   # 23 chars (too short)
+            "507f1f77bcf86cd7994390111",  # 25 chars (too long)
+            "507f1f77bcf86cd79943901g",   # contains 'g' (not hex)
+            "507f1f77-bcf8-6cd7-9943-9011",  # contains hyphens
+            "507f1f77 bcf86cd799439011",  # contains space
+            "not-an-objectid-at-all",    # not hex at all
+        ]
+        
+        for objectid in invalid_objectids:
+            assert not _is_mongodb_objectid(objectid), f"Should not detect {objectid} as ObjectId"
+    
+    def test_is_uuid_with_hyphens_valid(self):
+        """Test UUID with hyphens detection with valid UUIDs."""
+        from app.monitoring import _is_uuid_with_hyphens
+        
+        # Valid UUIDs with hyphens
+        valid_uuids = [
+            "550e8400-e29b-41d4-a716-446655440000",
+            "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+            "6ba7b811-9dad-11d1-80b4-00c04fd430c8",
+            "00000000-0000-0000-0000-000000000000",  # nil UUID
+            "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF",  # uppercase
+        ]
+        
+        for uuid in valid_uuids:
+            assert _is_uuid_with_hyphens(uuid), f"Should detect {uuid} as UUID with hyphens"
+    
+    def test_is_uuid_with_hyphens_invalid(self):
+        """Test UUID with hyphens detection with invalid UUIDs."""
+        from app.monitoring import _is_uuid_with_hyphens
+        
+        # Invalid UUIDs
+        invalid_uuids = [
+            "",  # empty
+            "550e8400-e29b-41d4-a716",  # too short
+            "550e8400-e29b-41d4-a716-446655440000-extra",  # too long
+            "550e8400e29b41d4a716446655440000",  # no hyphens
+            "550e8400-e29b-41d4-a716-44665544000g",  # contains 'g'
+            "550e8400-e29b-41d4-a716-4466554400000",  # last part too long
+            "550e8400-e29b-41d4-a7166-446655440000",  # middle part too long
+            "550e8400--e29b-41d4-a716-446655440000",  # double hyphen
+            "not-a-uuid-at-all-here-definitely",  # not hex
+        ]
+        
+        for uuid in invalid_uuids:
+            assert not _is_uuid_with_hyphens(uuid), f"Should not detect {uuid} as UUID with hyphens"
+    
+    def test_is_uuid_without_hyphens_valid(self):
+        """Test UUID without hyphens detection with valid UUIDs."""
+        from app.monitoring import _is_uuid_without_hyphens
+        
+        # Valid UUIDs without hyphens (32-char hex)
+        valid_uuids = [
+            "550e8400e29b41d4a716446655440000",
+            "6ba7b8109dad11d180b400c04fd430c8",
+            "00000000000000000000000000000000",  # nil UUID
+            "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",  # uppercase
+            "123456789abcdef0123456789abcdef0",  # mixed case
+        ]
+        
+        for uuid in valid_uuids:
+            assert _is_uuid_without_hyphens(uuid), f"Should detect {uuid} as UUID without hyphens"
+    
+    def test_is_uuid_without_hyphens_invalid(self):
+        """Test UUID without hyphens detection with invalid UUIDs."""
+        from app.monitoring import _is_uuid_without_hyphens
+        
+        # Invalid UUIDs
+        invalid_uuids = [
+            "",  # empty
+            "550e8400e29b41d4a71644665544000",   # 31 chars (too short)
+            "550e8400e29b41d4a7164466554400000",  # 33 chars (too long)
+            "550e8400e29b41d4a716446655440000g",  # contains 'g'
+            "550e8400-e29b-41d4-a716-446655440000",  # contains hyphens
+            "not-a-uuid-without-hyphens-here",   # not hex
+        ]
+        
+        for uuid in invalid_uuids:
+            assert not _is_uuid_without_hyphens(uuid), f"Should not detect {uuid} as UUID without hyphens"
+    
+    def test_is_numeric_id_valid(self):
+        """Test numeric ID detection with valid numeric IDs."""
+        from app.monitoring import _is_numeric_id
+        
+        # Valid numeric IDs
+        valid_numeric_ids = [
+            "1",
+            "123",
+            "456789",
+            "1234567890",
+            "0",  # single zero
+            "000123",  # leading zeros
+        ]
+        
+        for numeric_id in valid_numeric_ids:
+            assert _is_numeric_id(numeric_id), f"Should detect {numeric_id} as numeric ID"
+    
+    def test_is_numeric_id_invalid(self):
+        """Test numeric ID detection with invalid numeric IDs."""
+        from app.monitoring import _is_numeric_id
+        
+        # Invalid numeric IDs
+        invalid_numeric_ids = [
+            "",  # empty
+            "abc",  # letters
+            "123abc",  # mixed
+            "12.34",  # decimal
+            "12-34",  # hyphen
+            "12_34",  # underscore
+            " 123 ",  # spaces
+            "+123",  # plus sign
+            "-123",  # minus sign
+        ]
+        
+        for numeric_id in invalid_numeric_ids:
+            assert not _is_numeric_id(numeric_id), f"Should not detect {numeric_id} as numeric ID"
+    
+    def test_is_alphanumeric_id_valid(self):
+        """Test alphanumeric ID detection with valid alphanumeric IDs."""
+        from app.monitoring import _is_alphanumeric_id
+        
+        # Valid alphanumeric IDs (>8 chars, not in 20-40 char exclusion range)
+        valid_alphanumeric_ids = [
+            "user-abc123def",  # 15 chars with hyphen and numbers
+            "auth123token456",  # 16 chars with numbers
+            "mixedCase123ID",  # 14 chars with mixed case and numbers
+            "very_long_identifier_with_numbers_123_and_more_stuff",  # 53 chars
+        ]
+        
+        for alphanumeric_id in valid_alphanumeric_ids:
+            assert _is_alphanumeric_id(alphanumeric_id), f"Should detect {alphanumeric_id} as alphanumeric ID"
+    
+    def test_is_alphanumeric_id_invalid(self):
+        """Test alphanumeric ID detection with invalid alphanumeric IDs."""
+        from app.monitoring import _is_alphanumeric_id
+        
+        # Invalid alphanumeric IDs
+        invalid_alphanumeric_ids = [
+            "",  # empty
+            "short",  # too short (8 chars or less)
+            "12345678",  # exactly 8 chars
+            "onlyletters",  # only letters, no numbers/separators
+            "only-letters-here",  # only letters with separators
+            "has spaces in it 123",  # contains spaces
+            "has@special#chars123",  # contains special chars
+            "exactly20charslong12",  # 20 chars (in exclusion range)
+            "this-is-exactly-30-chars-long",  # 30 chars (in exclusion range)
+            "this-is-exactly-40-characters-long-id",  # 40 chars (in exclusion range)
+        ]
+        
+        for alphanumeric_id in invalid_alphanumeric_ids:
+            assert not _is_alphanumeric_id(alphanumeric_id), f"Should not detect {alphanumeric_id} as alphanumeric ID"
 
 
 class TestIDDetection:
@@ -864,11 +1448,12 @@ class TestIDDetection:
         """Test long alphanumeric ID detection."""
         from app.monitoring import _looks_like_id
         
-        # Valid long alphanumeric IDs (>8 chars, contains non-letters)
+        # Valid long alphanumeric IDs (>8 chars, contains non-letters, not in 20-40 char range)
         assert _looks_like_id("abc123def456") is True      # 12 chars with numbers
-        assert _looks_like_id("user_12345_session") is True # With underscores and numbers
-        assert _looks_like_id("token-abc123-def") is True   # With hyphens and numbers
-        assert _looks_like_id("session123456789") is True   # 16 chars with numbers
+        assert _looks_like_id("user_12345_ses") is True    # 13 chars with underscores and numbers
+        assert _looks_like_id("token-abc123-def") is True  # 16 chars with hyphens and numbers
+        assert _looks_like_id("session123456789") is True  # 16 chars with numbers
+        assert _looks_like_id("very_long_identifier_with_numbers_123_and_more_stuff") is True  # 58 chars
         
         # Invalid alphanumeric IDs
         assert _looks_like_id("abcdefgh") is False          # 8 chars, all letters
@@ -876,6 +1461,8 @@ class TestIDDetection:
         assert _looks_like_id("short1") is False            # 6 chars
         assert _looks_like_id("test") is False              # 4 chars, all letters
         assert _looks_like_id("") is False                  # Empty string
+        assert _looks_like_id("exactly20charslong12") is False  # 20 chars (in exclusion range)
+        assert _looks_like_id("this_is_exactly_30_chars_long") is False  # 30 chars (in exclusion range)
     
     def test_looks_like_id_edge_cases(self):
         """Test edge cases for ID detection."""
