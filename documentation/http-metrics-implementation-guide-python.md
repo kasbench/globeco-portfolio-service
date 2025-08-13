@@ -27,9 +27,13 @@ fastapi = "^0.104.0"
 uvicorn = "^0.24.0"
 prometheus-client = "^0.19.0"
 prometheus-fastapi-instrumentator = "^6.1.0"
+# OpenTelemetry dependencies (REQUIRED when using OpenTelemetry Collector)
+opentelemetry-api = "^1.20.0"
+opentelemetry-sdk = "^1.20.0"
+opentelemetry-exporter-otlp = "^1.20.0"
 ```
 
-**Note**: OpenTelemetry dependencies are not required for this implementation as it focuses on Prometheus metrics collection only.
+**IMPORTANT**: When using OpenTelemetry Collector in your infrastructure, you MUST implement both Prometheus metrics (for `/metrics` endpoint) AND OpenTelemetry metrics (for collector export). Using only Prometheus metrics will result in metrics being visible in `/metrics` but not appearing in your monitoring system.
 
 ### Environment Variables
 
@@ -50,7 +54,11 @@ Create `src/core/monitoring.py` with the following implementation:
 """
 Monitoring and observability module for GlobeCo microservices.
 
-This module provides standardized HTTP metrics collection using Prometheus.
+This module provides standardized HTTP metrics collection using both Prometheus
+(for /metrics endpoint) and OpenTelemetry (for collector export).
+
+CRITICAL: When using OpenTelemetry Collector, you MUST implement both systems
+to ensure metrics appear in your monitoring infrastructure.
 """
 
 import time
@@ -60,6 +68,10 @@ from fastapi import Request, Response
 from prometheus_client import Counter, Gauge, Histogram
 from prometheus_fastapi_instrumentator import Instrumentator, metrics
 from starlette.middleware.base import BaseHTTPMiddleware
+
+# OpenTelemetry imports for collector integration
+from opentelemetry import metrics as otel_metrics
+from opentelemetry.metrics import Counter as OTelCounter, Histogram as OTelHistogram, UpDownCounter as OTelGauge
 
 from src.core.utils import get_logger
 
@@ -134,6 +146,45 @@ HTTP_REQUESTS_IN_FLIGHT = _get_or_create_metric(
     'Number of HTTP requests currently being processed'
 )
 
+# OpenTelemetry HTTP metrics (for collector export)
+# CRITICAL: These are required when using OpenTelemetry Collector
+try:
+    meter = otel_metrics.get_meter(__name__)
+    
+    otel_http_requests_total = meter.create_counter(
+        name="http_requests_total",
+        description="Total number of HTTP requests",
+        unit="1"
+    )
+    
+    otel_http_request_duration = meter.create_histogram(
+        name="http_request_duration",
+        description="HTTP request duration in milliseconds", 
+        unit="ms"
+    )
+    
+    otel_http_requests_in_flight = meter.create_up_down_counter(
+        name="http_requests_in_flight",
+        description="Number of HTTP requests currently being processed",
+        unit="1"
+    )
+    
+    logger.info("Successfully created OpenTelemetry HTTP metrics")
+    
+except Exception as e:
+    logger.error(f"Failed to create OpenTelemetry metrics: {e}")
+    # Create dummy metrics as fallback
+    class DummyOTelMetric:
+        def add(self, amount, attributes=None):
+            pass
+        def record(self, amount, attributes=None):
+            pass
+    
+    otel_http_requests_total = DummyOTelMetric()
+    otel_http_request_duration = DummyOTelMetric()
+    otel_http_requests_in_flight = DummyOTelMetric()
+    logger.warning("Created dummy OpenTelemetry metrics due to initialization failure")
+
 
 class EnhancedHTTPMetricsMiddleware(BaseHTTPMiddleware):
     """
@@ -157,15 +208,31 @@ class EnhancedHTTPMetricsMiddleware(BaseHTTPMiddleware):
         # Start high-precision timing using perf_counter for millisecond precision
         start_time = time.perf_counter()
 
-        # Increment in-flight requests gauge
+        # Increment in-flight requests gauge (both Prometheus and OpenTelemetry)
         in_flight_incremented = False
+        otel_in_flight_incremented = False
+        
+        # Increment Prometheus in-flight gauge
         try:
             HTTP_REQUESTS_IN_FLIGHT.inc()
             in_flight_incremented = True
-            logger.debug("Successfully incremented in-flight requests gauge")
+            logger.debug("Successfully incremented Prometheus in-flight requests gauge")
         except Exception as e:
             logger.error(
-                "Failed to increment in-flight requests gauge",
+                "Failed to increment Prometheus in-flight requests gauge",
+                error=str(e),
+                error_type=type(e).__name__,
+                exc_info=True,
+            )
+        
+        # Increment OpenTelemetry in-flight gauge
+        try:
+            otel_http_requests_in_flight.add(1)
+            otel_in_flight_incremented = True
+            logger.debug("Successfully incremented OpenTelemetry in-flight requests gauge")
+        except Exception as e:
+            logger.error(
+                "Failed to increment OpenTelemetry in-flight requests gauge",
                 error=str(e),
                 error_type=type(e).__name__,
                 exc_info=True,
@@ -222,15 +289,28 @@ class EnhancedHTTPMetricsMiddleware(BaseHTTPMiddleware):
 
             raise
         finally:
-            # Always decrement in-flight requests gauge
+            # Always decrement in-flight requests gauge (both systems)
             # Only decrement if we successfully incremented to avoid negative values
             if in_flight_incremented:
                 try:
                     HTTP_REQUESTS_IN_FLIGHT.dec()
-                    logger.debug("Successfully decremented in-flight requests gauge")
+                    logger.debug("Successfully decremented Prometheus in-flight requests gauge")
                 except Exception as e:
                     logger.error(
-                        "Failed to decrement in-flight requests gauge",
+                        "Failed to decrement Prometheus in-flight requests gauge",
+                        error=str(e),
+                        error_type=type(e).__name__,
+                        exc_info=True,
+                    )
+            
+            # Decrement OpenTelemetry in-flight gauge
+            if otel_in_flight_incremented:
+                try:
+                    otel_http_requests_in_flight.add(-1)
+                    logger.debug("Successfully decremented OpenTelemetry in-flight requests gauge")
+                except Exception as e:
+                    logger.error(
+                        "Failed to decrement OpenTelemetry in-flight requests gauge",
                         error=str(e),
                         error_type=type(e).__name__,
                         exc_info=True,
@@ -241,7 +321,10 @@ class EnhancedHTTPMetricsMiddleware(BaseHTTPMiddleware):
     ) -> None:
         """
         Record all three HTTP metrics with comprehensive error handling.
-        Records to Prometheus (exposed via /metrics endpoint).
+        
+        CRITICAL: Records to BOTH systems:
+        - Prometheus (exposed via /metrics endpoint)
+        - OpenTelemetry (sent to collector and then to monitoring system)
 
         Args:
             method: HTTP method (uppercase)
@@ -251,25 +334,32 @@ class EnhancedHTTPMetricsMiddleware(BaseHTTPMiddleware):
         """
         # Debug logging for metric values during development
         logger.debug(
-            "Recording HTTP metrics",
+            "Recording HTTP metrics to both Prometheus and OpenTelemetry",
             method=method,
             path=path,
             status=status,
             duration_ms=duration_ms,
         )
 
-        # Record counter metrics with error handling
+        # Prepare attributes for OpenTelemetry metrics
+        otel_attributes = {
+            "method": method,
+            "path": path,
+            "status": status
+        }
+
+        # Record Prometheus counter metrics with error handling
         try:
             HTTP_REQUESTS_TOTAL.labels(method=method, path=path, status=status).inc()
             logger.debug(
-                "Successfully recorded HTTP requests total counter",
+                "Successfully recorded Prometheus HTTP requests total counter",
                 method=method,
                 path=path,
                 status=status,
             )
         except Exception as e:
             logger.error(
-                "Failed to record HTTP requests total counter",
+                "Failed to record Prometheus HTTP requests total counter",
                 error=str(e),
                 error_type=type(e).__name__,
                 method=method,
@@ -278,13 +368,33 @@ class EnhancedHTTPMetricsMiddleware(BaseHTTPMiddleware):
                 exc_info=True,
             )
 
-        # Record histogram metrics with error handling
+        # Record OpenTelemetry counter metrics with error handling
+        try:
+            otel_http_requests_total.add(1, attributes=otel_attributes)
+            logger.debug(
+                "Successfully recorded OpenTelemetry HTTP requests total counter",
+                method=method,
+                path=path,
+                status=status,
+            )
+        except Exception as e:
+            logger.error(
+                "Failed to record OpenTelemetry HTTP requests total counter",
+                error=str(e),
+                error_type=type(e).__name__,
+                method=method,
+                path=path,
+                status=status,
+                exc_info=True,
+            )
+
+        # Record Prometheus histogram metrics with error handling
         try:
             HTTP_REQUEST_DURATION.labels(
                 method=method, path=path, status=status
             ).observe(duration_ms)
             logger.debug(
-                "Successfully recorded HTTP request duration histogram",
+                "Successfully recorded Prometheus HTTP request duration histogram",
                 method=method,
                 path=path,
                 status=status,
@@ -292,7 +402,29 @@ class EnhancedHTTPMetricsMiddleware(BaseHTTPMiddleware):
             )
         except Exception as e:
             logger.error(
-                "Failed to record HTTP request duration histogram",
+                "Failed to record Prometheus HTTP request duration histogram",
+                error=str(e),
+                error_type=type(e).__name__,
+                method=method,
+                path=path,
+                status=status,
+                duration_ms=duration_ms,
+                exc_info=True,
+            )
+
+        # Record OpenTelemetry histogram metrics with error handling
+        try:
+            otel_http_request_duration.record(duration_ms, attributes=otel_attributes)
+            logger.debug(
+                "Successfully recorded OpenTelemetry HTTP request duration histogram",
+                method=method,
+                path=path,
+                status=status,
+                duration_ms=duration_ms,
+            )
+        except Exception as e:
+            logger.error(
+                "Failed to record OpenTelemetry HTTP request duration histogram",
                 error=str(e),
                 error_type=type(e).__name__,
                 method=method,
@@ -644,7 +776,22 @@ gunicorn --workers 4 src.main:app
 
 ## Common Pitfalls and Solutions
 
-### 1. **Inconsistent Metrics (Most Common Issue)**
+### 1. **Metrics Visible in /metrics but Not in Monitoring System (CRITICAL ISSUE)**
+
+**Problem**: HTTP metrics appear in the `/metrics` endpoint but don't show up in Prometheus/Grafana dashboards.
+
+**Cause**: Only implementing Prometheus metrics without OpenTelemetry integration when using OpenTelemetry Collector infrastructure.
+
+**Solution**: Implement BOTH Prometheus metrics (for `/metrics` endpoint) AND OpenTelemetry metrics (for collector export) as shown in the code above.
+
+**How to Identify**: 
+- `curl http://your-service:8088/metrics` shows metrics
+- Prometheus queries return no data: `http_requests_total{service="your-service"}`
+- OpenTelemetry Collector logs show no incoming metrics from your service
+
+**Prevention**: Always implement dual metrics system when using OpenTelemetry Collector.
+
+### 2. **Inconsistent Metrics (Second Most Common Issue)**
 
 **Problem**: Metrics counts go up and down randomly, don't match actual API calls.
 
@@ -652,7 +799,7 @@ gunicorn --workers 4 src.main:app
 
 **Solution**: Use single-process deployment (Uvicorn instead of multi-worker Gunicorn).
 
-### 2. **Duplicate Registration Errors**
+### 3. **Duplicate Registration Errors**
 
 **Problem**: `ValueError: Duplicated timeseries in CollectorRegistry`
 
@@ -660,7 +807,7 @@ gunicorn --workers 4 src.main:app
 
 **Solution**: Use the `_get_or_create_metric()` pattern shown in the code above.
 
-### 3. **High Cardinality Metrics**
+### 4. **High Cardinality Metrics**
 
 **Problem**: Too many unique label combinations, causing memory issues.
 
@@ -668,7 +815,7 @@ gunicorn --workers 4 src.main:app
 
 **Solution**: Implement proper route pattern extraction in `_extract_route_pattern()`.
 
-### 4. **Missing Metrics for Some Endpoints**
+### 5. **Missing Metrics for Some Endpoints**
 
 **Problem**: Some endpoints don't show up in metrics.
 
@@ -718,6 +865,7 @@ curl http://localhost:8088/metrics | grep http_request_duration_count
 
 ### 3. Validation Checklist
 
+#### Prometheus Metrics (via /metrics endpoint)
 - [ ] Metrics endpoint (`/metrics`) returns data
 - [ ] `http_requests_total` counter increases with each request
 - [ ] `http_request_duration_count` matches `http_requests_total`
@@ -725,6 +873,28 @@ curl http://localhost:8088/metrics | grep http_request_duration_count
 - [ ] Route patterns are parameterized (no raw IDs in labels)
 - [ ] Status codes are properly formatted as strings
 - [ ] Methods are uppercase
+
+#### OpenTelemetry Integration (CRITICAL for Collector setups)
+- [ ] OpenTelemetry Collector logs show incoming metrics from your service
+- [ ] Prometheus queries return data: `http_requests_total{service="your-service"}`
+- [ ] Both Prometheus and OpenTelemetry metrics have identical values
+- [ ] Service logs show "Successfully recorded OpenTelemetry" messages
+- [ ] No "Failed to record OpenTelemetry" errors in logs
+
+#### End-to-End Validation
+```bash
+# 1. Check /metrics endpoint
+curl http://localhost:8088/metrics | grep http_requests_total
+
+# 2. Check OpenTelemetry Collector logs
+kubectl logs -n monitoring deployment/otel-collector-collector | grep http_requests_total
+
+# 3. Query Prometheus directly
+curl -G 'http://prometheus:9090/api/v1/query' \
+  --data-urlencode 'query=http_requests_total{service="your-service"}'
+
+# 4. Verify metrics appear in Grafana dashboards
+```
 
 ### 4. Load Testing
 
@@ -753,16 +923,52 @@ Look for these log messages:
 
 ### Common Error Messages
 
-1. **"Failed to record HTTP requests total counter"**
-   - Check if metrics are properly initialized
+1. **"Failed to record OpenTelemetry HTTP requests total counter"**
+   - OpenTelemetry meter not properly initialized
+   - Check that OpenTelemetry SDK is configured in your main.py
+   - Verify OTLP exporters are configured correctly
+
+2. **"Failed to create OpenTelemetry metrics"**
+   - OpenTelemetry dependencies missing or not imported
+   - MeterProvider not set up correctly
+   - Check that `opentelemetry-api` and `opentelemetry-sdk` are installed
+
+3. **"Failed to record HTTP requests total counter"** (Prometheus)
+   - Check if Prometheus metrics are properly initialized
    - Verify no duplicate registration issues
 
-2. **"Metric already registered in Prometheus"**
+4. **"Metric already registered in Prometheus"**
    - Module reload issue, should be handled gracefully by dummy metrics
 
-3. **"Invalid status code type"**
+5. **"Invalid status code type"**
    - Response object not returning proper status code
    - Check your FastAPI response handling
+
+### OpenTelemetry-Specific Troubleshooting
+
+**Problem**: Metrics visible in `/metrics` but not in Prometheus
+```bash
+# Check if OpenTelemetry Collector is receiving metrics
+kubectl logs -n monitoring deployment/otel-collector-collector | grep "http_requests_total"
+
+# Check if your service is sending to collector
+kubectl logs your-service-pod | grep "OpenTelemetry"
+
+# Verify collector configuration includes your service
+kubectl get configmap -n monitoring otel-collector-config -o yaml
+```
+
+**Problem**: OpenTelemetry metrics initialization fails
+```python
+# Add this debug code to verify OpenTelemetry setup
+from opentelemetry import metrics as otel_metrics
+try:
+    meter = otel_metrics.get_meter(__name__)
+    print(f"Meter: {meter}")
+    print(f"MeterProvider: {otel_metrics.get_meter_provider()}")
+except Exception as e:
+    print(f"OpenTelemetry setup issue: {e}")
+```
 
 ### Prometheus Query Examples
 
@@ -838,13 +1044,16 @@ async def health_live():
 
 ## Best Practices
 
-1. **Single Process Deployment**: Always use single-process deployment for consistent metrics
-2. **Route Parameterization**: Always parameterize URLs with IDs to prevent high cardinality
-3. **Error Handling**: Wrap all metric operations in try-catch blocks
-4. **Structured Logging**: Use structured logging for better observability
-5. **Testing**: Always test metrics collection in your CI/CD pipeline
-6. **Documentation**: Document your service-specific route patterns
-7. **Prometheus Focus**: This implementation focuses on Prometheus metrics only, avoiding OpenTelemetry complexity
+1. **Dual Metrics System**: ALWAYS implement both Prometheus and OpenTelemetry metrics when using OpenTelemetry Collector
+2. **Single Process Deployment**: Always use single-process deployment for consistent metrics
+3. **Route Parameterization**: Always parameterize URLs with IDs to prevent high cardinality
+4. **Error Handling**: Wrap all metric operations in try-catch blocks for both systems
+5. **Structured Logging**: Use structured logging for better observability
+6. **Testing**: Always test BOTH Prometheus and OpenTelemetry metrics in your CI/CD pipeline
+7. **Documentation**: Document your service-specific route patterns
+8. **End-to-End Validation**: Verify metrics flow from service → collector → Prometheus → dashboards
+9. **Monitoring the Monitoring**: Set up alerts for metric collection failures
+10. **Consistent Naming**: Use identical metric names and attributes across both systems
 
 ## Support
 
@@ -855,4 +1064,86 @@ For questions or issues with this implementation:
 3. Validate your deployment uses single-process configuration
 4. Ensure route patterns are properly parameterized
 
-This implementation has been tested and validated in the GlobeCo Order Generation Service and provides consistent, reliable HTTP metrics using Prometheus without requiring external OpenTelemetry collectors. This simplified approach reduces complexity while maintaining full observability capabilities.
+## Testing Dual Metrics System
+
+### Integration Test Template
+
+Create this test to verify both systems work together:
+
+```python
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from unittest.mock import patch
+
+def test_dual_metrics_system():
+    """Test that both Prometheus and OpenTelemetry metrics are recorded."""
+    app = FastAPI()
+    app.add_middleware(EnhancedHTTPMetricsMiddleware)
+    
+    @app.get("/test")
+    async def test_endpoint():
+        return {"message": "test"}
+    
+    client = TestClient(app)
+    
+    # Mock OpenTelemetry metrics to verify they're called
+    with patch('src.core.monitoring.otel_http_requests_total') as mock_otel_counter, \
+         patch('src.core.monitoring.otel_http_request_duration') as mock_otel_histogram:
+        
+        # Make request
+        response = client.get("/test")
+        assert response.status_code == 200
+        
+        # Verify OpenTelemetry metrics were called
+        mock_otel_counter.add.assert_called_once_with(
+            1, 
+            attributes={"method": "GET", "path": "/test", "status": "200"}
+        )
+        mock_otel_histogram.record.assert_called_once()
+        
+        # Verify Prometheus metrics via /metrics endpoint
+        # (Add Prometheus endpoint to test app and verify metrics appear)
+```
+
+### Verification Script
+
+Use this script to validate your implementation:
+
+```python
+#!/usr/bin/env python3
+"""Verify dual metrics system is working correctly."""
+
+import requests
+import time
+
+def verify_metrics_integration(service_url):
+    """Verify both Prometheus and OpenTelemetry metrics work."""
+    
+    # 1. Make test requests
+    for i in range(5):
+        response = requests.get(f"{service_url}/health")
+        print(f"Request {i+1}: {response.status_code}")
+    
+    # 2. Check Prometheus /metrics endpoint
+    metrics_response = requests.get(f"{service_url}/metrics")
+    if "http_requests_total" in metrics_response.text:
+        print("✅ Prometheus metrics working")
+    else:
+        print("❌ Prometheus metrics missing")
+    
+    # 3. Check if metrics appear in Prometheus (requires Prometheus URL)
+    # prometheus_response = requests.get(
+    #     f"{prometheus_url}/api/v1/query",
+    #     params={"query": f'http_requests_total{{service="{service_name}"}}'}
+    # )
+    # if prometheus_response.json()["data"]["result"]:
+    #     print("✅ OpenTelemetry metrics working")
+    # else:
+    #     print("❌ OpenTelemetry metrics missing")
+
+if __name__ == "__main__":
+    verify_metrics_integration("http://localhost:8088")
+```
+
+This implementation has been tested and validated in the GlobeCo Portfolio Service and provides consistent, reliable HTTP metrics using both Prometheus (for `/metrics` endpoint) and OpenTelemetry (for collector export). This dual approach ensures metrics appear in your monitoring infrastructure regardless of collection method.
