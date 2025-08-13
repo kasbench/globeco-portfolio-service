@@ -1,8 +1,9 @@
 """
 Enhanced HTTP Metrics Monitoring Module for GlobeCo Portfolio Service.
 
-This module provides standardized HTTP metrics collection using Prometheus client
-with comprehensive error handling and duplicate registration prevention.
+This module provides standardized HTTP metrics collection using both Prometheus client
+(for /metrics endpoint) and OpenTelemetry (for collector export) with comprehensive 
+error handling and duplicate registration prevention.
 """
 
 import time
@@ -12,6 +13,10 @@ from fastapi import Request, Response
 from prometheus_client import Counter, Gauge, Histogram
 from starlette.middleware.base import BaseHTTPMiddleware
 from app.logging_config import get_logger
+
+# OpenTelemetry imports for collector integration
+from opentelemetry import metrics
+from opentelemetry.metrics import Counter as OTelCounter, Histogram as OTelHistogram, UpDownCounter as OTelGauge
 
 logger = get_logger(__name__)
 
@@ -135,7 +140,7 @@ def _get_or_create_metric(
         return dummy
 
 
-# Create the three standardized HTTP metrics
+# Create the three standardized HTTP metrics (Prometheus - for /metrics endpoint)
 HTTP_REQUESTS_TOTAL = _get_or_create_metric(
     Counter,
     'http_requests_total',
@@ -156,6 +161,51 @@ HTTP_REQUESTS_IN_FLIGHT = _get_or_create_metric(
     'http_requests_in_flight',
     'Number of HTTP requests currently being processed'
 )
+
+# Create OpenTelemetry metrics (for collector export)
+# These will be sent to the OpenTelemetry Collector and then to Prometheus
+try:
+    meter = metrics.get_meter(__name__)
+    
+    # OpenTelemetry HTTP metrics
+    otel_http_requests_total = meter.create_counter(
+        name="http_requests_total",
+        description="Total number of HTTP requests",
+        unit="1"
+    )
+    
+    otel_http_request_duration = meter.create_histogram(
+        name="http_request_duration",
+        description="HTTP request duration in milliseconds", 
+        unit="ms"
+    )
+    
+    otel_http_requests_in_flight = meter.create_up_down_counter(
+        name="http_requests_in_flight",
+        description="Number of HTTP requests currently being processed",
+        unit="1"
+    )
+    
+    logger.info("Successfully created OpenTelemetry HTTP metrics")
+    
+except Exception as e:
+    logger.error(
+        "Failed to create OpenTelemetry metrics",
+        error=str(e),
+        error_type=type(e).__name__,
+        exc_info=True
+    )
+    # Create dummy metrics as fallback
+    class DummyOTelMetric:
+        def add(self, amount, attributes=None):
+            pass
+        def record(self, amount, attributes=None):
+            pass
+    
+    otel_http_requests_total = DummyOTelMetric()
+    otel_http_request_duration = DummyOTelMetric()
+    otel_http_requests_in_flight = DummyOTelMetric()
+    logger.warning("Created dummy OpenTelemetry metrics due to initialization failure")
 
 
 def get_metrics_registry() -> Dict[str, Any]:
@@ -716,14 +766,31 @@ class EnhancedHTTPMetricsMiddleware(BaseHTTPMiddleware):
 
         # Increment in-flight requests gauge with error protection
         in_flight_incremented = False
+        otel_in_flight_incremented = False
+        
+        # Increment Prometheus in-flight gauge
         try:
             HTTP_REQUESTS_IN_FLIGHT.inc()
             in_flight_incremented = True
             if self.debug_logging:
-                logger.debug("Successfully incremented in-flight requests gauge")
+                logger.debug("Successfully incremented Prometheus in-flight requests gauge")
         except Exception as e:
             logger.error(
-                "Failed to increment in-flight requests gauge",
+                "Failed to increment Prometheus in-flight requests gauge",
+                error=str(e),
+                error_type=type(e).__name__,
+                exc_info=True,
+            )
+        
+        # Increment OpenTelemetry in-flight gauge
+        try:
+            otel_http_requests_in_flight.add(1)
+            otel_in_flight_incremented = True
+            if self.debug_logging:
+                logger.debug("Successfully incremented OpenTelemetry in-flight requests gauge")
+        except Exception as e:
+            logger.error(
+                "Failed to increment OpenTelemetry in-flight requests gauge",
                 error=str(e),
                 error_type=type(e).__name__,
                 exc_info=True,
@@ -787,10 +854,24 @@ class EnhancedHTTPMetricsMiddleware(BaseHTTPMiddleware):
                 try:
                     HTTP_REQUESTS_IN_FLIGHT.dec()
                     if self.debug_logging:
-                        logger.debug("Successfully decremented in-flight requests gauge")
+                        logger.debug("Successfully decremented Prometheus in-flight requests gauge")
                 except Exception as e:
                     logger.error(
-                        "Failed to decrement in-flight requests gauge",
+                        "Failed to decrement Prometheus in-flight requests gauge",
+                        error=str(e),
+                        error_type=type(e).__name__,
+                        exc_info=True,
+                    )
+            
+            # Decrement OpenTelemetry in-flight gauge
+            if otel_in_flight_incremented:
+                try:
+                    otel_http_requests_in_flight.add(-1)
+                    if self.debug_logging:
+                        logger.debug("Successfully decremented OpenTelemetry in-flight requests gauge")
+                except Exception as e:
+                    logger.error(
+                        "Failed to decrement OpenTelemetry in-flight requests gauge",
                         error=str(e),
                         error_type=type(e).__name__,
                         exc_info=True,
@@ -802,10 +883,9 @@ class EnhancedHTTPMetricsMiddleware(BaseHTTPMiddleware):
         """
         Record all three HTTP metrics with comprehensive error handling.
         
-        Records metrics to Prometheus (exposed via /metrics endpoint):
-        - Increments http_requests_total counter
-        - Records duration in http_request_duration histogram
-        - In-flight gauge is handled in dispatch method
+        Records metrics to both:
+        - Prometheus (exposed via /metrics endpoint)
+        - OpenTelemetry (sent to collector and then to Prometheus)
 
         Args:
             method: HTTP method (uppercase)
@@ -816,26 +896,33 @@ class EnhancedHTTPMetricsMiddleware(BaseHTTPMiddleware):
         # Debug logging for metric values during development
         if self.debug_logging:
             logger.debug(
-                "Recording HTTP metrics",
+                "Recording HTTP metrics to both Prometheus and OpenTelemetry",
                 method=method,
                 path=path,
                 status=status,
                 duration_ms=duration_ms,
             )
 
-        # Record counter metrics with error handling
+        # Prepare attributes for OpenTelemetry metrics
+        otel_attributes = {
+            "method": method,
+            "path": path,
+            "status": status
+        }
+
+        # Record Prometheus counter metrics with error handling
         try:
             HTTP_REQUESTS_TOTAL.labels(method=method, path=path, status=status).inc()
             if self.debug_logging:
                 logger.debug(
-                    "Successfully recorded HTTP requests total counter",
+                    "Successfully recorded Prometheus HTTP requests total counter",
                     method=method,
                     path=path,
                     status=status,
                 )
         except Exception as e:
             logger.error(
-                "Failed to record HTTP requests total counter",
+                "Failed to record Prometheus HTTP requests total counter",
                 error=str(e),
                 error_type=type(e).__name__,
                 method=method,
@@ -844,14 +931,35 @@ class EnhancedHTTPMetricsMiddleware(BaseHTTPMiddleware):
                 exc_info=True,
             )
 
-        # Record histogram metrics with error handling
+        # Record OpenTelemetry counter metrics with error handling
+        try:
+            otel_http_requests_total.add(1, attributes=otel_attributes)
+            if self.debug_logging:
+                logger.debug(
+                    "Successfully recorded OpenTelemetry HTTP requests total counter",
+                    method=method,
+                    path=path,
+                    status=status,
+                )
+        except Exception as e:
+            logger.error(
+                "Failed to record OpenTelemetry HTTP requests total counter",
+                error=str(e),
+                error_type=type(e).__name__,
+                method=method,
+                path=path,
+                status=status,
+                exc_info=True,
+            )
+
+        # Record Prometheus histogram metrics with error handling
         try:
             HTTP_REQUEST_DURATION.labels(
                 method=method, path=path, status=status
             ).observe(duration_ms)
             if self.debug_logging:
                 logger.debug(
-                    "Successfully recorded HTTP request duration histogram",
+                    "Successfully recorded Prometheus HTTP request duration histogram",
                     method=method,
                     path=path,
                     status=status,
@@ -859,7 +967,30 @@ class EnhancedHTTPMetricsMiddleware(BaseHTTPMiddleware):
                 )
         except Exception as e:
             logger.error(
-                "Failed to record HTTP request duration histogram",
+                "Failed to record Prometheus HTTP request duration histogram",
+                error=str(e),
+                error_type=type(e).__name__,
+                method=method,
+                path=path,
+                status=status,
+                duration_ms=duration_ms,
+                exc_info=True,
+            )
+
+        # Record OpenTelemetry histogram metrics with error handling
+        try:
+            otel_http_request_duration.record(duration_ms, attributes=otel_attributes)
+            if self.debug_logging:
+                logger.debug(
+                    "Successfully recorded OpenTelemetry HTTP request duration histogram",
+                    method=method,
+                    path=path,
+                    status=status,
+                    duration_ms=duration_ms,
+                )
+        except Exception as e:
+            logger.error(
+                "Failed to record OpenTelemetry HTTP request duration histogram",
                 error=str(e),
                 error_type=type(e).__name__,
                 method=method,
