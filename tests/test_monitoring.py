@@ -2073,3 +2073,500 @@ class TestLabelFormattingEdgeCases:
             
             assert method == method_input.upper()
             assert status == str(status_input)
+
+
+class TestEnhancedHTTPMetricsMiddleware:
+    """Test the EnhancedHTTPMetricsMiddleware class."""
+    
+    def setup_method(self):
+        """Clear registry before each test."""
+        clear_metrics_registry()
+    
+    def teardown_method(self):
+        """Clear registry after each test."""
+        clear_metrics_registry()
+    
+    @pytest.fixture
+    def mock_app(self):
+        """Mock ASGI application."""
+        return Mock()
+    
+    @pytest.fixture
+    def mock_request(self):
+        """Mock FastAPI Request."""
+        request = Mock()
+        request.method = "GET"
+        request.url.path = "/api/v1/portfolios"
+        return request
+    
+    @pytest.fixture
+    def mock_response(self):
+        """Mock FastAPI Response."""
+        response = Mock()
+        response.status_code = 200
+        return response
+    
+    @pytest.fixture
+    def middleware(self, mock_app):
+        """Create middleware instance."""
+        from app.monitoring import EnhancedHTTPMetricsMiddleware
+        return EnhancedHTTPMetricsMiddleware(mock_app)
+    
+    @pytest.fixture
+    def debug_middleware(self, mock_app):
+        """Create middleware instance with debug logging."""
+        from app.monitoring import EnhancedHTTPMetricsMiddleware
+        return EnhancedHTTPMetricsMiddleware(mock_app, debug_logging=True)
+    
+    def test_middleware_initialization(self, mock_app):
+        """Test middleware initialization."""
+        from app.monitoring import EnhancedHTTPMetricsMiddleware
+        
+        # Test normal initialization
+        middleware = EnhancedHTTPMetricsMiddleware(mock_app)
+        assert middleware.debug_logging is False
+        
+        # Test with debug logging
+        debug_middleware = EnhancedHTTPMetricsMiddleware(mock_app, debug_logging=True)
+        assert debug_middleware.debug_logging is True
+    
+    @pytest.mark.asyncio
+    async def test_successful_request_metrics_recording(self, middleware, mock_request, mock_response):
+        """Test metrics recording for successful requests."""
+        # Mock the metrics
+        with patch('app.monitoring.HTTP_REQUESTS_TOTAL') as mock_counter, \
+             patch('app.monitoring.HTTP_REQUEST_DURATION') as mock_histogram, \
+             patch('app.monitoring.HTTP_REQUESTS_IN_FLIGHT') as mock_gauge, \
+             patch('app.monitoring._extract_route_pattern') as mock_extract_route, \
+             patch('app.monitoring._get_method_label') as mock_get_method, \
+             patch('app.monitoring._format_status_code') as mock_format_status:
+            
+            # Setup mock returns
+            mock_extract_route.return_value = "/api/v1/portfolios"
+            mock_get_method.return_value = "GET"
+            mock_format_status.return_value = "200"
+            
+            # Mock labeled metrics
+            mock_labeled_counter = Mock()
+            mock_labeled_histogram = Mock()
+            mock_counter.labels.return_value = mock_labeled_counter
+            mock_histogram.labels.return_value = mock_labeled_histogram
+            
+            # Mock call_next
+            async def mock_call_next(request):
+                return mock_response
+            
+            # Execute middleware
+            result = await middleware.dispatch(mock_request, mock_call_next)
+            
+            # Verify response is returned
+            assert result is mock_response
+            
+            # Verify in-flight gauge operations
+            mock_gauge.inc.assert_called_once()
+            mock_gauge.dec.assert_called_once()
+            
+            # Verify counter metrics
+            mock_counter.labels.assert_called_once_with(
+                method="GET", path="/api/v1/portfolios", status="200"
+            )
+            mock_labeled_counter.inc.assert_called_once()
+            
+            # Verify histogram metrics
+            mock_histogram.labels.assert_called_once_with(
+                method="GET", path="/api/v1/portfolios", status="200"
+            )
+            mock_labeled_histogram.observe.assert_called_once()
+            
+            # Verify observe was called with a positive duration
+            observe_call = mock_labeled_histogram.observe.call_args[0][0]
+            assert observe_call > 0  # Should be positive milliseconds
+    
+    @pytest.mark.asyncio
+    async def test_exception_during_request_processing(self, middleware, mock_request):
+        """Test metrics recording when request processing raises exception."""
+        # Mock the metrics
+        with patch('app.monitoring.HTTP_REQUESTS_TOTAL') as mock_counter, \
+             patch('app.monitoring.HTTP_REQUEST_DURATION') as mock_histogram, \
+             patch('app.monitoring.HTTP_REQUESTS_IN_FLIGHT') as mock_gauge, \
+             patch('app.monitoring._extract_route_pattern') as mock_extract_route, \
+             patch('app.monitoring._get_method_label') as mock_get_method, \
+             patch('app.monitoring._format_status_code') as mock_format_status:
+            
+            # Setup mock returns
+            mock_extract_route.return_value = "/api/v1/portfolios"
+            mock_get_method.return_value = "GET"
+            mock_format_status.return_value = "500"
+            
+            # Mock labeled metrics
+            mock_labeled_counter = Mock()
+            mock_labeled_histogram = Mock()
+            mock_counter.labels.return_value = mock_labeled_counter
+            mock_histogram.labels.return_value = mock_labeled_histogram
+            
+            # Mock call_next to raise exception
+            async def mock_call_next(request):
+                raise ValueError("Test exception")
+            
+            # Execute middleware and expect exception to be re-raised
+            with pytest.raises(ValueError, match="Test exception"):
+                await middleware.dispatch(mock_request, mock_call_next)
+            
+            # Verify in-flight gauge operations
+            mock_gauge.inc.assert_called_once()
+            mock_gauge.dec.assert_called_once()
+            
+            # Verify counter metrics with status 500
+            mock_counter.labels.assert_called_once_with(
+                method="GET", path="/api/v1/portfolios", status="500"
+            )
+            mock_labeled_counter.inc.assert_called_once()
+            
+            # Verify histogram metrics with status 500
+            mock_histogram.labels.assert_called_once_with(
+                method="GET", path="/api/v1/portfolios", status="500"
+            )
+            mock_labeled_histogram.observe.assert_called_once()
+    
+    @pytest.mark.asyncio
+    async def test_in_flight_gauge_increment_error(self, middleware, mock_request, mock_response):
+        """Test handling of in-flight gauge increment errors."""
+        with patch('app.monitoring.HTTP_REQUESTS_TOTAL') as mock_counter, \
+             patch('app.monitoring.HTTP_REQUEST_DURATION') as mock_histogram, \
+             patch('app.monitoring.HTTP_REQUESTS_IN_FLIGHT') as mock_gauge, \
+             patch('app.monitoring._extract_route_pattern') as mock_extract_route, \
+             patch('app.monitoring._get_method_label') as mock_get_method, \
+             patch('app.monitoring._format_status_code') as mock_format_status:
+            
+            # Setup mock returns
+            mock_extract_route.return_value = "/api/v1/portfolios"
+            mock_get_method.return_value = "GET"
+            mock_format_status.return_value = "200"
+            
+            # Mock labeled metrics
+            mock_labeled_counter = Mock()
+            mock_labeled_histogram = Mock()
+            mock_counter.labels.return_value = mock_labeled_counter
+            mock_histogram.labels.return_value = mock_labeled_histogram
+            
+            # Make gauge increment fail
+            mock_gauge.inc.side_effect = Exception("Gauge increment failed")
+            
+            # Mock call_next
+            async def mock_call_next(request):
+                return mock_response
+            
+            # Execute middleware - should not raise exception
+            result = await middleware.dispatch(mock_request, mock_call_next)
+            
+            # Verify response is returned despite gauge error
+            assert result is mock_response
+            
+            # Verify increment was attempted
+            mock_gauge.inc.assert_called_once()
+            
+            # Verify decrement was NOT called (since increment failed)
+            mock_gauge.dec.assert_not_called()
+            
+            # Verify other metrics still recorded
+            mock_labeled_counter.inc.assert_called_once()
+            mock_labeled_histogram.observe.assert_called_once()
+    
+    @pytest.mark.asyncio
+    async def test_in_flight_gauge_decrement_error(self, middleware, mock_request, mock_response):
+        """Test handling of in-flight gauge decrement errors."""
+        with patch('app.monitoring.HTTP_REQUESTS_TOTAL') as mock_counter, \
+             patch('app.monitoring.HTTP_REQUEST_DURATION') as mock_histogram, \
+             patch('app.monitoring.HTTP_REQUESTS_IN_FLIGHT') as mock_gauge, \
+             patch('app.monitoring._extract_route_pattern') as mock_extract_route, \
+             patch('app.monitoring._get_method_label') as mock_get_method, \
+             patch('app.monitoring._format_status_code') as mock_format_status:
+            
+            # Setup mock returns
+            mock_extract_route.return_value = "/api/v1/portfolios"
+            mock_get_method.return_value = "GET"
+            mock_format_status.return_value = "200"
+            
+            # Mock labeled metrics
+            mock_labeled_counter = Mock()
+            mock_labeled_histogram = Mock()
+            mock_counter.labels.return_value = mock_labeled_counter
+            mock_histogram.labels.return_value = mock_labeled_histogram
+            
+            # Make gauge decrement fail
+            mock_gauge.dec.side_effect = Exception("Gauge decrement failed")
+            
+            # Mock call_next
+            async def mock_call_next(request):
+                return mock_response
+            
+            # Execute middleware - should not raise exception
+            result = await middleware.dispatch(mock_request, mock_call_next)
+            
+            # Verify response is returned despite gauge error
+            assert result is mock_response
+            
+            # Verify both increment and decrement were attempted
+            mock_gauge.inc.assert_called_once()
+            mock_gauge.dec.assert_called_once()
+            
+            # Verify other metrics still recorded
+            mock_labeled_counter.inc.assert_called_once()
+            mock_labeled_histogram.observe.assert_called_once()
+    
+    @pytest.mark.asyncio
+    async def test_high_precision_timing(self, middleware, mock_request, mock_response):
+        """Test that high-precision timing is used."""
+        with patch('app.monitoring.time.perf_counter') as mock_perf_counter, \
+             patch('app.monitoring.HTTP_REQUESTS_TOTAL') as mock_counter, \
+             patch('app.monitoring.HTTP_REQUEST_DURATION') as mock_histogram, \
+             patch('app.monitoring.HTTP_REQUESTS_IN_FLIGHT') as mock_gauge, \
+             patch('app.monitoring._extract_route_pattern') as mock_extract_route, \
+             patch('app.monitoring._get_method_label') as mock_get_method, \
+             patch('app.monitoring._format_status_code') as mock_format_status:
+            
+            # Setup timing mocks - simulate 150ms request
+            mock_perf_counter.side_effect = [0.0, 0.15]  # 150ms difference
+            
+            # Setup other mocks
+            mock_extract_route.return_value = "/api/v1/portfolios"
+            mock_get_method.return_value = "GET"
+            mock_format_status.return_value = "200"
+            
+            mock_labeled_counter = Mock()
+            mock_labeled_histogram = Mock()
+            mock_counter.labels.return_value = mock_labeled_counter
+            mock_histogram.labels.return_value = mock_labeled_histogram
+            
+            # Mock call_next
+            async def mock_call_next(request):
+                return mock_response
+            
+            # Execute middleware
+            await middleware.dispatch(mock_request, mock_call_next)
+            
+            # Verify perf_counter was called twice (start and end)
+            assert mock_perf_counter.call_count == 2
+            
+            # Verify histogram was called with 150ms (0.15 * 1000)
+            mock_labeled_histogram.observe.assert_called_once_with(150.0)
+    
+    @pytest.mark.asyncio
+    async def test_slow_request_logging(self, middleware, mock_request, mock_response):
+        """Test that slow requests are logged."""
+        with patch('app.monitoring.time.perf_counter') as mock_perf_counter, \
+             patch('app.monitoring.HTTP_REQUESTS_TOTAL') as mock_counter, \
+             patch('app.monitoring.HTTP_REQUEST_DURATION') as mock_histogram, \
+             patch('app.monitoring.HTTP_REQUESTS_IN_FLIGHT') as mock_gauge, \
+             patch('app.monitoring._extract_route_pattern') as mock_extract_route, \
+             patch('app.monitoring._get_method_label') as mock_get_method, \
+             patch('app.monitoring._format_status_code') as mock_format_status, \
+             patch('app.monitoring.logger') as mock_logger:
+            
+            # Setup timing mocks - simulate 1500ms request (slow)
+            mock_perf_counter.side_effect = [0.0, 1.5]  # 1500ms difference
+            
+            # Setup other mocks
+            mock_extract_route.return_value = "/api/v1/portfolios"
+            mock_get_method.return_value = "GET"
+            mock_format_status.return_value = "200"
+            
+            mock_labeled_counter = Mock()
+            mock_labeled_histogram = Mock()
+            mock_counter.labels.return_value = mock_labeled_counter
+            mock_histogram.labels.return_value = mock_labeled_histogram
+            
+            # Mock call_next
+            async def mock_call_next(request):
+                return mock_response
+            
+            # Execute middleware
+            await middleware.dispatch(mock_request, mock_call_next)
+            
+            # Verify slow request warning was logged
+            mock_logger.warning.assert_called_once()
+            warning_call = mock_logger.warning.call_args
+            assert "Slow request detected" in warning_call[0][0]
+    
+    @pytest.mark.asyncio
+    async def test_debug_logging_enabled(self, debug_middleware, mock_request, mock_response):
+        """Test debug logging when enabled."""
+        with patch('app.monitoring.HTTP_REQUESTS_TOTAL') as mock_counter, \
+             patch('app.monitoring.HTTP_REQUEST_DURATION') as mock_histogram, \
+             patch('app.monitoring.HTTP_REQUESTS_IN_FLIGHT') as mock_gauge, \
+             patch('app.monitoring._extract_route_pattern') as mock_extract_route, \
+             patch('app.monitoring._get_method_label') as mock_get_method, \
+             patch('app.monitoring._format_status_code') as mock_format_status, \
+             patch('app.monitoring.logger') as mock_logger:
+            
+            # Setup mock returns
+            mock_extract_route.return_value = "/api/v1/portfolios"
+            mock_get_method.return_value = "GET"
+            mock_format_status.return_value = "200"
+            
+            mock_labeled_counter = Mock()
+            mock_labeled_histogram = Mock()
+            mock_counter.labels.return_value = mock_labeled_counter
+            mock_histogram.labels.return_value = mock_labeled_histogram
+            
+            # Mock call_next
+            async def mock_call_next(request):
+                return mock_response
+            
+            # Execute middleware
+            await debug_middleware.dispatch(mock_request, mock_call_next)
+            
+            # Verify debug logging was called
+            debug_calls = [call for call in mock_logger.debug.call_args_list 
+                          if "Successfully incremented in-flight requests gauge" in str(call) or
+                             "Successfully decremented in-flight requests gauge" in str(call)]
+            assert len(debug_calls) >= 2  # At least increment and decrement logs
+    
+    def test_record_metrics_success(self, middleware):
+        """Test _record_metrics method with successful recording."""
+        with patch('app.monitoring.HTTP_REQUESTS_TOTAL') as mock_counter, \
+             patch('app.monitoring.HTTP_REQUEST_DURATION') as mock_histogram:
+            
+            mock_labeled_counter = Mock()
+            mock_labeled_histogram = Mock()
+            mock_counter.labels.return_value = mock_labeled_counter
+            mock_histogram.labels.return_value = mock_labeled_histogram
+            
+            # Call _record_metrics
+            middleware._record_metrics("GET", "/api/v1/portfolios", "200", 150.5)
+            
+            # Verify counter recording
+            mock_counter.labels.assert_called_once_with(
+                method="GET", path="/api/v1/portfolios", status="200"
+            )
+            mock_labeled_counter.inc.assert_called_once()
+            
+            # Verify histogram recording
+            mock_histogram.labels.assert_called_once_with(
+                method="GET", path="/api/v1/portfolios", status="200"
+            )
+            mock_labeled_histogram.observe.assert_called_once_with(150.5)
+    
+    def test_record_metrics_counter_error(self, middleware):
+        """Test _record_metrics method with counter recording error."""
+        with patch('app.monitoring.HTTP_REQUESTS_TOTAL') as mock_counter, \
+             patch('app.monitoring.HTTP_REQUEST_DURATION') as mock_histogram, \
+             patch('app.monitoring.logger') as mock_logger:
+            
+            mock_labeled_counter = Mock()
+            mock_labeled_histogram = Mock()
+            mock_counter.labels.return_value = mock_labeled_counter
+            mock_histogram.labels.return_value = mock_labeled_histogram
+            
+            # Make counter increment fail
+            mock_labeled_counter.inc.side_effect = Exception("Counter error")
+            
+            # Call _record_metrics - should not raise exception
+            middleware._record_metrics("GET", "/api/v1/portfolios", "200", 150.5)
+            
+            # Verify error was logged
+            mock_logger.error.assert_called()
+            error_calls = [call for call in mock_logger.error.call_args_list 
+                          if "Failed to record HTTP requests total counter" in str(call)]
+            assert len(error_calls) > 0
+            
+            # Verify histogram was still attempted
+            mock_labeled_histogram.observe.assert_called_once_with(150.5)
+    
+    def test_record_metrics_histogram_error(self, middleware):
+        """Test _record_metrics method with histogram recording error."""
+        with patch('app.monitoring.HTTP_REQUESTS_TOTAL') as mock_counter, \
+             patch('app.monitoring.HTTP_REQUEST_DURATION') as mock_histogram, \
+             patch('app.monitoring.logger') as mock_logger:
+            
+            mock_labeled_counter = Mock()
+            mock_labeled_histogram = Mock()
+            mock_counter.labels.return_value = mock_labeled_counter
+            mock_histogram.labels.return_value = mock_labeled_histogram
+            
+            # Make histogram observe fail
+            mock_labeled_histogram.observe.side_effect = Exception("Histogram error")
+            
+            # Call _record_metrics - should not raise exception
+            middleware._record_metrics("GET", "/api/v1/portfolios", "200", 150.5)
+            
+            # Verify counter was still recorded
+            mock_labeled_counter.inc.assert_called_once()
+            
+            # Verify error was logged
+            mock_logger.error.assert_called()
+            error_calls = [call for call in mock_logger.error.call_args_list 
+                          if "Failed to record HTTP request duration histogram" in str(call)]
+            assert len(error_calls) > 0
+    
+    def test_record_metrics_debug_logging(self, debug_middleware):
+        """Test _record_metrics method with debug logging enabled."""
+        with patch('app.monitoring.HTTP_REQUESTS_TOTAL') as mock_counter, \
+             patch('app.monitoring.HTTP_REQUEST_DURATION') as mock_histogram, \
+             patch('app.monitoring.logger') as mock_logger:
+            
+            mock_labeled_counter = Mock()
+            mock_labeled_histogram = Mock()
+            mock_counter.labels.return_value = mock_labeled_counter
+            mock_histogram.labels.return_value = mock_labeled_histogram
+            
+            # Call _record_metrics
+            debug_middleware._record_metrics("POST", "/api/v2/portfolios", "201", 75.2)
+            
+            # Verify debug logging was called
+            debug_calls = [call for call in mock_logger.debug.call_args_list 
+                          if "Recording HTTP metrics" in str(call) or
+                             "Successfully recorded HTTP" in str(call)]
+            assert len(debug_calls) >= 3  # Initial recording + 2 success logs
+    
+    @pytest.mark.asyncio
+    async def test_middleware_with_different_request_methods(self, middleware):
+        """Test middleware with different HTTP methods."""
+        methods_and_responses = [
+            ("GET", 200),
+            ("POST", 201),
+            ("PUT", 200),
+            ("DELETE", 204),
+            ("PATCH", 200),
+        ]
+        
+        for method, status_code in methods_and_responses:
+            with patch('app.monitoring.HTTP_REQUESTS_TOTAL') as mock_counter, \
+                 patch('app.monitoring.HTTP_REQUEST_DURATION') as mock_histogram, \
+                 patch('app.monitoring.HTTP_REQUESTS_IN_FLIGHT') as mock_gauge, \
+                 patch('app.monitoring._extract_route_pattern') as mock_extract_route, \
+                 patch('app.monitoring._get_method_label') as mock_get_method, \
+                 patch('app.monitoring._format_status_code') as mock_format_status:
+                
+                # Setup mocks
+                mock_extract_route.return_value = "/api/v1/portfolios"
+                mock_get_method.return_value = method
+                mock_format_status.return_value = str(status_code)
+                
+                mock_labeled_counter = Mock()
+                mock_labeled_histogram = Mock()
+                mock_counter.labels.return_value = mock_labeled_counter
+                mock_histogram.labels.return_value = mock_labeled_histogram
+                
+                # Create request and response
+                request = Mock()
+                request.method = method
+                request.url.path = "/api/v1/portfolios"
+                
+                response = Mock()
+                response.status_code = status_code
+                
+                # Mock call_next
+                async def mock_call_next(req):
+                    return response
+                
+                # Execute middleware
+                result = await middleware.dispatch(request, mock_call_next)
+                
+                # Verify correct method and status were used
+                mock_counter.labels.assert_called_once_with(
+                    method=method, path="/api/v1/portfolios", status=str(status_code)
+                )
+                mock_histogram.labels.assert_called_once_with(
+                    method=method, path="/api/v1/portfolios", status=str(status_code)
+                )

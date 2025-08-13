@@ -6,10 +6,11 @@ with comprehensive error handling and duplicate registration prevention.
 """
 
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Callable
 
-from fastapi import Request
+from fastapi import Request, Response
 from prometheus_client import Counter, Gauge, Histogram
+from starlette.middleware.base import BaseHTTPMiddleware
 from app.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -664,6 +665,209 @@ def _format_status_code(status_code: int) -> str:
             exc_info=True
         )
         return "unknown"
+
+
+class EnhancedHTTPMetricsMiddleware(BaseHTTPMiddleware):
+    """
+    Enhanced middleware to collect standardized HTTP request metrics.
+
+    This middleware implements the standardized HTTP metrics with proper timing,
+    in-flight tracking, and comprehensive error handling using Prometheus.
+    
+    Collects three core metrics:
+    - http_requests_total: Counter of total HTTP requests
+    - http_request_duration: Histogram of request durations in milliseconds
+    - http_requests_in_flight: Gauge of currently processing requests
+    """
+
+    def __init__(self, app, debug_logging: bool = False):
+        """
+        Initialize the middleware.
+        
+        Args:
+            app: ASGI application
+            debug_logging: Enable debug logging for metrics collection
+        """
+        super().__init__(app)
+        self.debug_logging = debug_logging
+        
+        # Log middleware initialization
+        logger.info("EnhancedHTTPMetricsMiddleware initialized")
+        if self.debug_logging:
+            logger.debug("Debug logging enabled for HTTP metrics middleware")
+
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        """
+        Process request and collect all three standardized HTTP metrics.
+
+        Uses high-precision timing with time.perf_counter() for millisecond accuracy.
+        Implements comprehensive error handling to ensure metrics are recorded
+        even when request processing fails.
+
+        Args:
+            request: The incoming HTTP request
+            call_next: The next middleware/endpoint to call
+
+        Returns:
+            Response with metrics recorded for the request
+        """
+        # Start high-precision timing using perf_counter for millisecond precision
+        start_time = time.perf_counter()
+
+        # Increment in-flight requests gauge with error protection
+        in_flight_incremented = False
+        try:
+            HTTP_REQUESTS_IN_FLIGHT.inc()
+            in_flight_incremented = True
+            if self.debug_logging:
+                logger.debug("Successfully incremented in-flight requests gauge")
+        except Exception as e:
+            logger.error(
+                "Failed to increment in-flight requests gauge",
+                error=str(e),
+                error_type=type(e).__name__,
+                exc_info=True,
+            )
+
+        try:
+            # Process the request through the application
+            response = await call_next(request)
+
+            # Calculate duration in milliseconds with high precision
+            duration_ms = (time.perf_counter() - start_time) * 1000
+
+            # Extract labels for metrics
+            method = _get_method_label(request.method)
+            path = _extract_route_pattern(request)
+            status = _format_status_code(response.status_code)
+
+            # Record all three metrics with comprehensive error handling
+            self._record_metrics(method, path, status, duration_ms)
+
+            # Log slow requests (> 1000ms) for performance monitoring
+            if duration_ms > 1000:
+                logger.warning(
+                    "Slow request detected",
+                    method=method,
+                    path=path,
+                    duration_ms=duration_ms,
+                    status=status,
+                )
+
+            return response
+
+        except Exception as e:
+            # Calculate duration even for exceptions to maintain accurate metrics
+            duration_ms = (time.perf_counter() - start_time) * 1000
+
+            # Extract labels for error metrics
+            method = _get_method_label(request.method)
+            path = _extract_route_pattern(request)
+            status = "500"  # All exceptions result in 500 status for metrics
+
+            # Record metrics even when exceptions occur
+            self._record_metrics(method, path, status, duration_ms)
+
+            logger.error(
+                "Request processing error - metrics collection attempted",
+                error=str(e),
+                error_type=type(e).__name__,
+                method=method,
+                path=path,
+                duration_ms=duration_ms,
+                exc_info=True,
+            )
+
+            # Re-raise the exception to maintain normal error handling
+            raise
+        finally:
+            # Always decrement in-flight requests gauge
+            # Only decrement if we successfully incremented to avoid negative values
+            if in_flight_incremented:
+                try:
+                    HTTP_REQUESTS_IN_FLIGHT.dec()
+                    if self.debug_logging:
+                        logger.debug("Successfully decremented in-flight requests gauge")
+                except Exception as e:
+                    logger.error(
+                        "Failed to decrement in-flight requests gauge",
+                        error=str(e),
+                        error_type=type(e).__name__,
+                        exc_info=True,
+                    )
+
+    def _record_metrics(
+        self, method: str, path: str, status: str, duration_ms: float
+    ) -> None:
+        """
+        Record all three HTTP metrics with comprehensive error handling.
+        
+        Records metrics to Prometheus (exposed via /metrics endpoint):
+        - Increments http_requests_total counter
+        - Records duration in http_request_duration histogram
+        - In-flight gauge is handled in dispatch method
+
+        Args:
+            method: HTTP method (uppercase)
+            path: Route pattern with parameterized IDs
+            status: HTTP status code as string
+            duration_ms: Request duration in milliseconds
+        """
+        # Debug logging for metric values during development
+        if self.debug_logging:
+            logger.debug(
+                "Recording HTTP metrics",
+                method=method,
+                path=path,
+                status=status,
+                duration_ms=duration_ms,
+            )
+
+        # Record counter metrics with error handling
+        try:
+            HTTP_REQUESTS_TOTAL.labels(method=method, path=path, status=status).inc()
+            if self.debug_logging:
+                logger.debug(
+                    "Successfully recorded HTTP requests total counter",
+                    method=method,
+                    path=path,
+                    status=status,
+                )
+        except Exception as e:
+            logger.error(
+                "Failed to record HTTP requests total counter",
+                error=str(e),
+                error_type=type(e).__name__,
+                method=method,
+                path=path,
+                status=status,
+                exc_info=True,
+            )
+
+        # Record histogram metrics with error handling
+        try:
+            HTTP_REQUEST_DURATION.labels(
+                method=method, path=path, status=status
+            ).observe(duration_ms)
+            if self.debug_logging:
+                logger.debug(
+                    "Successfully recorded HTTP request duration histogram",
+                    method=method,
+                    path=path,
+                    status=status,
+                    duration_ms=duration_ms,
+                )
+        except Exception as e:
+            logger.error(
+                "Failed to record HTTP request duration histogram",
+                error=str(e),
+                error_type=type(e).__name__,
+                method=method,
+                path=path,
+                status=status,
+                duration_ms=duration_ms,
+                exc_info=True,
+            )
 
 
 # Initialize metrics on module import
