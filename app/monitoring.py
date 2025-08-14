@@ -85,10 +85,26 @@ def _get_or_create_metric(
 
     # Check if metric already exists in our registry
     if registry_key in _METRICS_REGISTRY:
-        logger.debug(f"Reusing existing metric: {name}")
+        logger.debug(
+            "Reusing existing metric from registry",
+            metric_name=name,
+            registry_key=registry_key,
+            metric_type=type(_METRICS_REGISTRY[registry_key]).__name__
+        )
         return _METRICS_REGISTRY[registry_key]
 
     try:
+        # Log metric creation attempt
+        logger.debug(
+            "Attempting to create new metric",
+            metric_name=name,
+            metric_class=metric_class.__name__ if hasattr(metric_class, '__name__') else str(metric_class),
+            description=description,
+            labels=labels,
+            registry_key=registry_key,
+            additional_kwargs=list(kwargs.keys()) if kwargs else []
+        )
+        
         # Create metric with or without labels
         if labels:
             metric = metric_class(name, description, labels, **kwargs)
@@ -96,47 +112,79 @@ def _get_or_create_metric(
             metric = metric_class(name, description, **kwargs)
 
         _METRICS_REGISTRY[registry_key] = metric
-        logger.info(f"Successfully created metric: {name}")
+        logger.info(
+            "Successfully created and registered metric",
+            metric_name=name,
+            metric_type=type(metric).__name__,
+            registry_key=registry_key,
+            has_labels=bool(labels),
+            label_count=len(labels) if labels else 0,
+            registry_size=len(_METRICS_REGISTRY)
+        )
         return metric
 
     except ValueError as e:
         if "Duplicated timeseries" in str(e):
             logger.warning(
-                "Metric already registered in Prometheus but not in our registry",
+                "Metric already registered in Prometheus registry but not in our internal registry",
                 metric_name=name,
+                registry_key=registry_key,
                 error=str(e),
-                error_type=type(e).__name__
+                error_type=type(e).__name__,
+                prometheus_registry_conflict=True
             )
             # Create dummy metric to prevent service disruption
             dummy = DummyMetric()
             _METRICS_REGISTRY[registry_key] = dummy
-            logger.warning(f"Created dummy metric for {name} to prevent errors")
+            logger.warning(
+                "Created dummy metric to prevent service disruption",
+                metric_name=name,
+                registry_key=registry_key,
+                fallback_type="DummyMetric",
+                reason="prometheus_registry_conflict"
+            )
             return dummy
         else:
             logger.error(
-                "Failed to create metric",
+                "ValueError during metric creation - using dummy metric fallback",
                 metric_name=name,
+                registry_key=registry_key,
                 error=str(e),
                 error_type=type(e).__name__,
+                metric_class=metric_class.__name__ if hasattr(metric_class, '__name__') else str(metric_class),
                 exc_info=True
             )
             # Create dummy metric as fallback
             dummy = DummyMetric()
             _METRICS_REGISTRY[registry_key] = dummy
-            logger.error(f"Created dummy metric for {name} due to creation failure")
+            logger.error(
+                "Created dummy metric due to ValueError",
+                metric_name=name,
+                registry_key=registry_key,
+                fallback_type="DummyMetric",
+                reason="value_error"
+            )
             return dummy
     except Exception as e:
         logger.error(
-            "Unexpected error creating metric",
+            "Unexpected error during metric creation - using dummy metric fallback",
             metric_name=name,
+            registry_key=registry_key,
             error=str(e),
             error_type=type(e).__name__,
+            metric_class=metric_class.__name__ if hasattr(metric_class, '__name__') else str(metric_class),
             exc_info=True
         )
         # Create dummy metric as fallback
         dummy = DummyMetric()
         _METRICS_REGISTRY[registry_key] = dummy
-        logger.error(f"Created dummy metric for {name} due to unexpected error")
+        logger.error(
+            "Created dummy metric due to unexpected error",
+            metric_name=name,
+            registry_key=registry_key,
+            fallback_type="DummyMetric",
+            reason="unexpected_error"
+        )
         return dummy
 
 
@@ -297,14 +345,19 @@ def _extract_route_pattern(request: Request) -> str:
         # Safely get path for logging without causing another exception
         try:
             path_for_logging = getattr(request.url, 'path', 'unknown')
+            url_for_logging = str(request.url) if hasattr(request, 'url') else 'unknown'
         except Exception:
             path_for_logging = 'unknown'
+            url_for_logging = 'unknown'
             
         logger.error(
-            "Failed to extract route pattern",
+            "Critical error in route pattern extraction - using fallback pattern",
             error=str(e),
             error_type=type(e).__name__,
             path=path_for_logging,
+            url=url_for_logging,
+            fallback_pattern="/unknown",
+            impact="metrics_cardinality_protection",
             exc_info=True
         )
         return "/unknown"
@@ -413,28 +466,37 @@ def _sanitize_unmatched_route(path: str) -> str:
         # Ensure we don't create overly long patterns
         if len(result) > 200:
             logger.warning(
-                "Route pattern too long after sanitization, using fallback",
+                "Route pattern exceeds maximum length after sanitization - using fallback",
                 original_path=path,
-                sanitized_length=len(result)
+                sanitized_pattern=result[:50] + "..." if len(result) > 50 else result,
+                sanitized_length=len(result),
+                max_allowed_length=200,
+                fallback_pattern="/unknown",
+                reason="length_protection"
             )
             return "/unknown"
         
         # Log the sanitization result for debugging
         if result != path:
             logger.debug(
-                "Sanitized unmatched route",
+                "Successfully sanitized unmatched route pattern",
                 original_path=path,
-                sanitized_pattern=result
+                sanitized_pattern=result,
+                path_segments_count=len(parts),
+                parameterized_segments=sum(1 for part in sanitized_parts if part == "{id}"),
+                truncated_segments=sum(1 for i, part in enumerate(parts) if part and len(part) > 50 and sanitized_parts[i] != "{id}")
             )
         
         return result
         
     except Exception as e:
         logger.error(
-            "Failed to sanitize unmatched route",
+            "Critical error during route sanitization - using fallback pattern",
             error=str(e),
             error_type=type(e).__name__,
             path=path,
+            fallback_pattern="/unknown",
+            impact="metrics_cardinality_protection",
             exc_info=True
         )
         return "/unknown"
@@ -653,19 +715,23 @@ def _get_method_label(method: str) -> str:
         # This allows for custom methods while maintaining visibility
         if method_upper not in valid_methods:
             logger.debug(
-                "Unknown HTTP method encountered",
+                "Non-standard HTTP method encountered - allowing but logging for visibility",
                 method=method,
-                method_upper=method_upper
+                method_upper=method_upper,
+                valid_methods=list(valid_methods),
+                action="allow_with_logging"
             )
         
         return method_upper
         
     except Exception as e:
         logger.error(
-            "Failed to format method label",
+            "Critical error formatting HTTP method label - using fallback",
             error=str(e),
             error_type=type(e).__name__,
             method=method,
+            method_type=type(method).__name__ if method is not None else "NoneType",
+            fallback_value="UNKNOWN",
             exc_info=True
         )
         return "UNKNOWN"
@@ -698,20 +764,31 @@ def _format_status_code(status_code: int) -> str:
         # HTTP status codes are defined as 100-599 in RFC 7231
         if status_code < 100 or status_code > 599:
             logger.warning(
-                "Status code out of valid HTTP range (100-599)",
-                status_code=status_code
+                "HTTP status code outside valid range - using fallback",
+                status_code=status_code,
+                valid_range="100-599",
+                fallback_value="unknown",
+                rfc_reference="RFC 7231"
             )
             return "unknown"
         
         # Convert to string for consistent labeling
-        return str(status_code)
+        status_str = str(status_code)
+        logger.debug(
+            "Successfully formatted status code label",
+            status_code=status_code,
+            formatted_label=status_str
+        )
+        return status_str
         
     except Exception as e:
         logger.error(
-            "Failed to format status code label",
+            "Critical error formatting HTTP status code label - using fallback",
             error=str(e),
             error_type=type(e).__name__,
             status_code=status_code,
+            status_code_type=type(status_code).__name__ if status_code is not None else "NoneType",
+            fallback_value="unknown",
             exc_info=True
         )
         return "unknown"
@@ -741,10 +818,59 @@ class EnhancedHTTPMetricsMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self.debug_logging = debug_logging
         
-        # Log middleware initialization
-        logger.info("EnhancedHTTPMetricsMiddleware initialized")
+        # Log middleware initialization with comprehensive details
+        logger.info(
+            "EnhancedHTTPMetricsMiddleware initialized successfully",
+            debug_logging_enabled=self.debug_logging,
+            middleware_version="enhanced",
+            metrics_collected=["http_requests_total", "http_request_duration", "http_requests_in_flight"],
+            timing_precision="milliseconds",
+            error_handling="comprehensive"
+        )
+        
         if self.debug_logging:
-            logger.debug("Debug logging enabled for HTTP metrics middleware")
+            logger.debug(
+                "Debug logging enabled for HTTP metrics middleware - verbose metrics information will be logged",
+                log_level="debug",
+                performance_impact="minimal",
+                recommended_for="development_and_troubleshooting"
+            )
+            
+        # Validate that metrics are available
+        try:
+            # Test that metrics are accessible
+            if is_dummy_metric(HTTP_REQUESTS_TOTAL):
+                logger.warning(
+                    "HTTP requests total counter is using dummy metric - metrics may not be recorded",
+                    metric_name="http_requests_total",
+                    metric_type="DummyMetric",
+                    impact="counter_metrics_disabled"
+                )
+            
+            if is_dummy_metric(HTTP_REQUEST_DURATION):
+                logger.warning(
+                    "HTTP request duration histogram is using dummy metric - duration metrics may not be recorded",
+                    metric_name="http_request_duration",
+                    metric_type="DummyMetric",
+                    impact="duration_metrics_disabled"
+                )
+                
+            if is_dummy_metric(HTTP_REQUESTS_IN_FLIGHT):
+                logger.warning(
+                    "HTTP requests in-flight gauge is using dummy metric - in-flight metrics may not be recorded",
+                    metric_name="http_requests_in_flight",
+                    metric_type="DummyMetric",
+                    impact="in_flight_metrics_disabled"
+                )
+                
+        except Exception as e:
+            logger.error(
+                "Error validating metrics during middleware initialization",
+                error=str(e),
+                error_type=type(e).__name__,
+                impact="metrics_validation_failed",
+                exc_info=True
+            )
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         """
@@ -763,6 +889,33 @@ class EnhancedHTTPMetricsMiddleware(BaseHTTPMiddleware):
         """
         # Start high-precision timing using perf_counter for millisecond precision
         start_time = time.perf_counter()
+        
+        # Extract basic request information for logging
+        request_method = getattr(request, 'method', 'UNKNOWN')
+        request_path = 'unknown'
+        request_url = 'unknown'
+        
+        try:
+            if hasattr(request, 'url'):
+                request_path = getattr(request.url, 'path', 'unknown')
+                request_url = str(request.url)
+        except Exception as e:
+            logger.debug(
+                "Could not extract request URL information for logging",
+                error=str(e),
+                fallback_path=request_path,
+                fallback_url=request_url
+            )
+
+        if self.debug_logging:
+            logger.debug(
+                "Starting HTTP request processing with metrics collection",
+                method=request_method,
+                path=request_path,
+                url=request_url,
+                start_time=start_time,
+                timing_precision="perf_counter_milliseconds"
+            )
 
         # Increment in-flight requests gauge with error protection
         in_flight_incremented = False
@@ -773,12 +926,21 @@ class EnhancedHTTPMetricsMiddleware(BaseHTTPMiddleware):
             HTTP_REQUESTS_IN_FLIGHT.inc()
             in_flight_incremented = True
             if self.debug_logging:
-                logger.debug("Successfully incremented Prometheus in-flight requests gauge")
+                logger.debug(
+                    "Successfully incremented Prometheus in-flight requests gauge",
+                    method=request_method,
+                    path=request_path,
+                    gauge_operation="increment"
+                )
         except Exception as e:
             logger.error(
-                "Failed to increment Prometheus in-flight requests gauge",
+                "Failed to increment Prometheus in-flight requests gauge - continuing request processing",
                 error=str(e),
                 error_type=type(e).__name__,
+                method=request_method,
+                path=request_path,
+                gauge_operation="increment",
+                impact="in_flight_prometheus_metrics_disabled",
                 exc_info=True,
             )
         
@@ -787,12 +949,21 @@ class EnhancedHTTPMetricsMiddleware(BaseHTTPMiddleware):
             otel_http_requests_in_flight.add(1)
             otel_in_flight_incremented = True
             if self.debug_logging:
-                logger.debug("Successfully incremented OpenTelemetry in-flight requests gauge")
+                logger.debug(
+                    "Successfully incremented OpenTelemetry in-flight requests gauge",
+                    method=request_method,
+                    path=request_path,
+                    gauge_operation="increment"
+                )
         except Exception as e:
             logger.error(
-                "Failed to increment OpenTelemetry in-flight requests gauge",
+                "Failed to increment OpenTelemetry in-flight requests gauge - continuing request processing",
                 error=str(e),
                 error_type=type(e).__name__,
+                method=request_method,
+                path=request_path,
+                gauge_operation="increment",
+                impact="in_flight_otel_metrics_disabled",
                 exc_info=True,
             )
 
@@ -809,17 +980,46 @@ class EnhancedHTTPMetricsMiddleware(BaseHTTPMiddleware):
             status = _format_status_code(response.status_code)
 
             # Record all three metrics with comprehensive error handling
-            self._record_metrics(method, path, status, duration_ms)
+            try:
+                self._record_metrics(method, path, status, duration_ms)
+            except Exception as metrics_error:
+                logger.error(
+                    "Failed to record metrics for successful request - continuing request processing",
+                    error=str(metrics_error),
+                    error_type=type(metrics_error).__name__,
+                    method=method,
+                    path=path,
+                    status=status,
+                    duration_ms=round(duration_ms, 2),
+                    impact="metrics_recording_failed_but_request_succeeded",
+                    exc_info=True
+                )
 
             # Log slow requests (> 1000ms) for performance monitoring
             if duration_ms > 1000:
                 logger.warning(
-                    "Slow request detected",
+                    "Slow request detected - performance monitoring alert",
                     method=method,
                     path=path,
-                    duration_ms=duration_ms,
+                    duration_ms=round(duration_ms, 2),
                     status=status,
+                    request_url=str(request.url) if hasattr(request, 'url') else 'unknown',
+                    slow_request_threshold_ms=1000,
+                    performance_impact="high"
                 )
+                
+                # Additional debug info for slow requests if debug logging is enabled
+                if self.debug_logging:
+                    logger.debug(
+                        "Slow request debug information",
+                        method=method,
+                        path=path,
+                        duration_ms=round(duration_ms, 2),
+                        status=status,
+                        request_headers=dict(request.headers) if hasattr(request, 'headers') else {},
+                        client_host=getattr(request.client, 'host', 'unknown') if hasattr(request, 'client') else 'unknown',
+                        query_params=str(request.url.query) if hasattr(request, 'url') and hasattr(request.url, 'query') else 'none'
+                    )
 
             return response
 
@@ -827,21 +1027,63 @@ class EnhancedHTTPMetricsMiddleware(BaseHTTPMiddleware):
             # Calculate duration even for exceptions to maintain accurate metrics
             duration_ms = (time.perf_counter() - start_time) * 1000
 
-            # Extract labels for error metrics
-            method = _get_method_label(request.method)
-            path = _extract_route_pattern(request)
+            # Extract labels for error metrics with comprehensive error handling
+            method = "UNKNOWN"
+            path = "/unknown"
+            
+            try:
+                method = _get_method_label(request.method)
+            except Exception as method_error:
+                logger.debug(
+                    "Could not extract method for error metrics",
+                    error=str(method_error),
+                    fallback_method=method
+                )
+                
+            try:
+                path = _extract_route_pattern(request)
+            except Exception as path_error:
+                logger.debug(
+                    "Could not extract path pattern for error metrics",
+                    error=str(path_error),
+                    fallback_path=path
+                )
+            
             status = "500"  # All exceptions result in 500 status for metrics
 
             # Record metrics even when exceptions occur
-            self._record_metrics(method, path, status, duration_ms)
+            try:
+                self._record_metrics(method, path, status, duration_ms)
+                if self.debug_logging:
+                    logger.debug(
+                        "Successfully recorded metrics for failed request",
+                        method=method,
+                        path=path,
+                        status=status,
+                        duration_ms=round(duration_ms, 2)
+                    )
+            except Exception as metrics_error:
+                logger.error(
+                    "Failed to record metrics for failed request - double error condition",
+                    original_error=str(e),
+                    metrics_error=str(metrics_error),
+                    method=method,
+                    path=path,
+                    status=status,
+                    duration_ms=round(duration_ms, 2),
+                    impact="metrics_recording_failed"
+                )
 
             logger.error(
-                "Request processing error - metrics collection attempted",
+                "Request processing failed - attempted metrics collection for error case",
                 error=str(e),
                 error_type=type(e).__name__,
                 method=method,
                 path=path,
-                duration_ms=duration_ms,
+                status=status,
+                duration_ms=round(duration_ms, 2),
+                request_url=request_url,
+                error_handling="metrics_recorded_for_500_status",
                 exc_info=True,
             )
 
@@ -854,13 +1096,31 @@ class EnhancedHTTPMetricsMiddleware(BaseHTTPMiddleware):
                 try:
                     HTTP_REQUESTS_IN_FLIGHT.dec()
                     if self.debug_logging:
-                        logger.debug("Successfully decremented Prometheus in-flight requests gauge")
+                        logger.debug(
+                            "Successfully decremented Prometheus in-flight requests gauge",
+                            method=request_method,
+                            path=request_path,
+                            gauge_operation="decrement"
+                        )
                 except Exception as e:
                     logger.error(
-                        "Failed to decrement Prometheus in-flight requests gauge",
+                        "Critical error decrementing Prometheus in-flight requests gauge - gauge may be inaccurate",
                         error=str(e),
                         error_type=type(e).__name__,
+                        method=request_method,
+                        path=request_path,
+                        gauge_operation="decrement",
+                        impact="prometheus_gauge_accuracy_compromised",
+                        mitigation="gauge_will_self_correct_over_time",
                         exc_info=True,
+                    )
+            else:
+                if self.debug_logging:
+                    logger.debug(
+                        "Skipping Prometheus in-flight gauge decrement - was not incremented",
+                        method=request_method,
+                        path=request_path,
+                        reason="increment_failed_or_skipped"
                     )
             
             # Decrement OpenTelemetry in-flight gauge
@@ -868,13 +1128,31 @@ class EnhancedHTTPMetricsMiddleware(BaseHTTPMiddleware):
                 try:
                     otel_http_requests_in_flight.add(-1)
                     if self.debug_logging:
-                        logger.debug("Successfully decremented OpenTelemetry in-flight requests gauge")
+                        logger.debug(
+                            "Successfully decremented OpenTelemetry in-flight requests gauge",
+                            method=request_method,
+                            path=request_path,
+                            gauge_operation="decrement"
+                        )
                 except Exception as e:
                     logger.error(
-                        "Failed to decrement OpenTelemetry in-flight requests gauge",
+                        "Critical error decrementing OpenTelemetry in-flight requests gauge - gauge may be inaccurate",
                         error=str(e),
                         error_type=type(e).__name__,
+                        method=request_method,
+                        path=request_path,
+                        gauge_operation="decrement",
+                        impact="otel_gauge_accuracy_compromised",
+                        mitigation="gauge_will_self_correct_over_time",
                         exc_info=True,
+                    )
+            else:
+                if self.debug_logging:
+                    logger.debug(
+                        "Skipping OpenTelemetry in-flight gauge decrement - was not incremented",
+                        method=request_method,
+                        path=request_path,
+                        reason="increment_failed_or_skipped"
                     )
 
     def _record_metrics(
@@ -928,6 +1206,73 @@ class EnhancedHTTPMetricsMiddleware(BaseHTTPMiddleware):
                 method=method,
                 path=path,
                 status=status,
+                exc_info=True,
+            )
+
+        # Record Prometheus histogram metrics with error handling
+        try:
+            HTTP_REQUEST_DURATION.labels(method=method, path=path, status=status).observe(duration_ms)
+            if self.debug_logging:
+                logger.debug(
+                    "Successfully recorded Prometheus HTTP request duration histogram",
+                    method=method,
+                    path=path,
+                    status=status,
+                    duration_ms=duration_ms,
+                )
+        except Exception as e:
+            logger.error(
+                "Failed to record Prometheus HTTP request duration histogram",
+                error=str(e),
+                error_type=type(e).__name__,
+                method=method,
+                path=path,
+                status=status,
+                duration_ms=duration_ms,
+                exc_info=True,
+            )
+
+        # Record OpenTelemetry counter metrics with error handling
+        try:
+            otel_http_requests_total.add(1, attributes=otel_attributes)
+            if self.debug_logging:
+                logger.debug(
+                    "Successfully recorded OpenTelemetry HTTP requests total counter",
+                    method=method,
+                    path=path,
+                    status=status,
+                )
+        except Exception as e:
+            logger.error(
+                "Failed to record OpenTelemetry HTTP requests total counter",
+                error=str(e),
+                error_type=type(e).__name__,
+                method=method,
+                path=path,
+                status=status,
+                exc_info=True,
+            )
+
+        # Record OpenTelemetry histogram metrics with error handling
+        try:
+            otel_http_request_duration.record(duration_ms, attributes=otel_attributes)
+            if self.debug_logging:
+                logger.debug(
+                    "Successfully recorded OpenTelemetry HTTP request duration histogram",
+                    method=method,
+                    path=path,
+                    status=status,
+                    duration_ms=duration_ms,
+                )
+        except Exception as e:
+            logger.error(
+                "Failed to record OpenTelemetry HTTP request duration histogram",
+                error=str(e),
+                error_type=type(e).__name__,
+                method=method,
+                path=path,
+                status=status,
+                duration_ms=duration_ms,
                 exc_info=True,
             )
 
