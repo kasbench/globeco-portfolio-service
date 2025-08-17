@@ -17,6 +17,7 @@
 - Please develop a streamlined plan that front-loads production of the metrics so that I can test in Kubernetes.  Once I see the metrics, I may want additional changes.  I don't want to go too deep before vetting that these are the metrics we need.
 
 
+
 ## New metrics to be produced
 
 
@@ -45,3 +46,6 @@ This represents the actual instantaneous thread pool size.
 
 **Implementation**: Count queued work items that have been accepted by the server but are waiting for a thread to become available to process them. When all threads are busy and new requests arrive, they get queued here.
 
+## Documentation
+
+Keep track of the steps taken to implement this enhancement in a new document.  Update the document after each step.  This document will be extremely useful when we apply this change to other microservices in this suite.
