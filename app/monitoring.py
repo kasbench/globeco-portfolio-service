@@ -851,31 +851,360 @@ def _detect_asyncio_queue() -> Optional[int]:
         # Try to get the current event loop
         try:
             loop = asyncio.get_running_loop()
-        except RuntimeError:
-            # No running loop
-            logger.debug("No running asyncio event loop found")
+            logger.debug(
+                "Found running asyncio event loop for queue detection",
+                loop_type=type(loop).__name__,
+                loop_running=loop.is_running() if hasattr(loop, 'is_running') else 'unknown'
+            )
+        except RuntimeError as e:
+            logger.debug(
+                "No running asyncio event loop found for queue detection",
+                error=str(e),
+                fallback_action="return_none"
+            )
             return None
         
         queue_depth = 0
         found_queue_info = False
+        detection_methods = []
         
         # Count pending tasks that might be HTTP requests
         if hasattr(loop, '_scheduled'):
             try:
                 scheduled_tasks = len(loop._scheduled)
-                logger.debug(
-                    "Found scheduled asyncio tasks",
-                    scheduled_count=scheduled_tasks
-                )
                 queue_depth += scheduled_tasks
                 found_queue_info = True
+                detection_methods.append('scheduled_tasks')
+                logger.debug(
+                    "Found scheduled tasks in asyncio loop",
+                    scheduled_tasks=scheduled_tasks,
+                    detection_method='loop._scheduled'
+                )
             except Exception as e:
                 logger.debug(
-                    "Error accessing scheduled tasks",
-                    error=str(e)
+                    "Error accessing loop._scheduled for queue detection",
+                    error=str(e),
+                    error_type=type(e).__name__
                 )
         
-        # Check for ready tasks (don't add to queue depth as they're being processed)
+        # Try to count ready tasks
+        if hasattr(loop, '_ready'):
+            try:
+                ready_tasks = len(loop._ready)
+                queue_depth += ready_tasks
+                found_queue_info = True
+                detection_methods.append('ready_tasks')
+                logger.debug(
+                    "Found ready tasks in asyncio loop",
+                    ready_tasks=ready_tasks,
+                    detection_method='loop._ready'
+                )
+            except Exception as e:
+                logger.debug(
+                    "Error accessing loop._ready for queue detection",
+                    error=str(e),
+                    error_type=type(e).__name__
+                )
+        
+        # Try to get all tasks
+        try:
+            all_tasks = asyncio.all_tasks(loop)
+            pending_tasks = [task for task in all_tasks if not task.done()]
+            if pending_tasks:
+                queue_depth = max(queue_depth, len(pending_tasks))
+                found_queue_info = True
+                detection_methods.append('all_tasks')
+                logger.debug(
+                    "Found pending tasks via asyncio.all_tasks",
+                    total_tasks=len(all_tasks),
+                    pending_tasks=len(pending_tasks),
+                    done_tasks=len(all_tasks) - len(pending_tasks),
+                    detection_method='asyncio.all_tasks'
+                )
+        except Exception as e:
+            logger.debug(
+                "Error using asyncio.all_tasks for queue detection",
+                error=str(e),
+                error_type=type(e).__name__
+            )
+        
+        if found_queue_info:
+            logger.debug(
+                "Successfully detected asyncio queue depth",
+                queue_depth=queue_depth,
+                detection_methods=detection_methods,
+                methods_used=len(detection_methods)
+            )
+            return queue_depth
+        else:
+            logger.debug(
+                "No asyncio queue information could be detected",
+                attempted_methods=['_scheduled', '_ready', 'all_tasks'],
+                loop_attributes=list(dir(loop))[:10] if hasattr(loop, '__dict__') else 'unavailable'
+            )
+            return None
+        
+    except Exception as e:
+        logger.debug(
+            "Error detecting asyncio queue depth",
+            error=str(e),
+            error_type=type(e).__name__,
+            fallback_result=None,
+            detection_stage="asyncio_loop_access"
+        )
+        return None
+
+
+def _detect_system_level_queue() -> Optional[int]:
+    """
+    Detect request queue depth using system-level indicators.
+    
+    Attempts to detect queued requests using system-level metrics
+    such as socket backlog, connection counts, or other OS-level indicators.
+    
+    Returns:
+        Number of queued requests or None if detection fails
+    """
+    try:
+        import socket
+        import psutil
+        
+        queue_indicators = []
+        total_queue_estimate = 0
+        
+        # Try to get network connection information
+        try:
+            connections = psutil.net_connections(kind='tcp')
+            listening_connections = [conn for conn in connections if conn.status == 'LISTEN']
+            established_connections = [conn for conn in connections if conn.status == 'ESTABLISHED']
+            
+            # Look for connections on common HTTP ports
+            http_ports = [8000, 80, 443, 8080, 8443]
+            http_listening = [conn for conn in listening_connections if conn.laddr.port in http_ports]
+            http_established = [conn for conn in established_connections if conn.laddr.port in http_ports]
+            
+            if http_listening or http_established:
+                # Estimate queue depth based on connection patterns
+                # This is a heuristic - not exact science
+                queue_estimate = max(0, len(http_established) - 2)  # Assume 2 are actively processing
+                total_queue_estimate += queue_estimate
+                queue_indicators.append('network_connections')
+                
+                logger.debug(
+                    "Detected HTTP connections for queue estimation",
+                    total_connections=len(connections),
+                    listening_connections=len(listening_connections),
+                    established_connections=len(established_connections),
+                    http_listening=len(http_listening),
+                    http_established=len(http_established),
+                    queue_estimate=queue_estimate,
+                    detection_method='psutil_net_connections'
+                )
+        except Exception as e:
+            logger.debug(
+                "Error accessing network connections for queue detection",
+                error=str(e),
+                error_type=type(e).__name__,
+                detection_method='psutil_net_connections'
+            )
+        
+        # Try to get process-level information
+        try:
+            current_process = psutil.Process()
+            num_threads = current_process.num_threads()
+            num_fds = current_process.num_fds() if hasattr(current_process, 'num_fds') else 0
+            
+            # Heuristic: if we have many file descriptors but few threads,
+            # there might be queued connections
+            if num_fds > num_threads * 2:
+                fd_queue_estimate = max(0, (num_fds - num_threads * 2) // 2)
+                total_queue_estimate += fd_queue_estimate
+                queue_indicators.append('file_descriptors')
+                
+                logger.debug(
+                    "Estimated queue depth from file descriptor analysis",
+                    num_threads=num_threads,
+                    num_fds=num_fds,
+                    fd_queue_estimate=fd_queue_estimate,
+                    detection_method='process_fd_analysis'
+                )
+        except Exception as e:
+            logger.debug(
+                "Error accessing process information for queue detection",
+                error=str(e),
+                error_type=type(e).__name__,
+                detection_method='psutil_process'
+            )
+        
+        if queue_indicators:
+            logger.debug(
+                "Successfully estimated system-level queue depth",
+                total_queue_estimate=total_queue_estimate,
+                queue_indicators=queue_indicators,
+                indicators_used=len(queue_indicators),
+                estimation_confidence='low_heuristic'
+            )
+            return total_queue_estimate
+        else:
+            logger.debug(
+                "No system-level queue indicators could be detected",
+                attempted_methods=['network_connections', 'file_descriptors'],
+                psutil_available=True
+            )
+            return None
+            
+    except ImportError as e:
+        logger.debug(
+            "psutil not available for system-level queue detection",
+            error=str(e),
+            fallback_action="skip_system_detection",
+            suggestion="install_psutil_for_enhanced_detection"
+        )
+        return None
+    except Exception as e:
+        logger.error(
+            "Unexpected error in system-level queue detection",
+            error=str(e),
+            error_type=type(e).__name__,
+            fallback_result=None,
+            detection_stage="system_level_analysis",
+            exc_info=True
+        )
+        return None
+
+
+def _estimate_queue_from_metrics() -> Optional[int]:
+    """
+    Estimate queue depth from existing HTTP metrics correlation.
+    
+    Uses the relationship between requests in flight, active worker threads,
+    and recent request patterns to estimate queue depth.
+    
+    Returns:
+        Estimated number of queued requests or None if estimation fails
+    """
+    try:
+        # Get current metrics values
+        try:
+            # Try to get current in-flight requests
+            in_flight_value = 0
+            if hasattr(HTTP_REQUESTS_IN_FLIGHT, '_value') and hasattr(HTTP_REQUESTS_IN_FLIGHT._value, '_value'):
+                in_flight_value = HTTP_REQUESTS_IN_FLIGHT._value._value
+            elif hasattr(HTTP_REQUESTS_IN_FLIGHT, 'get'):
+                in_flight_value = HTTP_REQUESTS_IN_FLIGHT.get()
+            
+            logger.debug(
+                "Retrieved in-flight requests metric for queue estimation",
+                in_flight_requests=in_flight_value,
+                metric_source='prometheus_gauge'
+            )
+        except Exception as e:
+            logger.debug(
+                "Error retrieving in-flight requests metric",
+                error=str(e),
+                error_type=type(e).__name__,
+                fallback_value=0
+            )
+            in_flight_value = 0
+        
+        # Get current worker thread counts
+        try:
+            active_workers = get_active_worker_count()
+            total_workers = get_total_worker_count()
+            
+            logger.debug(
+                "Retrieved worker thread counts for queue estimation",
+                active_workers=active_workers,
+                total_workers=total_workers,
+                worker_utilization=f"{(active_workers/max(total_workers, 1)*100):.1f}%" if total_workers > 0 else "0%"
+            )
+        except Exception as e:
+            logger.debug(
+                "Error retrieving worker thread counts for queue estimation",
+                error=str(e),
+                error_type=type(e).__name__,
+                fallback_values="zero_workers"
+            )
+            active_workers = 0
+            total_workers = 0
+        
+        # Estimate queue depth using correlation logic
+        estimated_queue = 0
+        estimation_factors = []
+        
+        # Factor 1: If in-flight requests exceed active workers, the difference might be queued
+        if in_flight_value > active_workers:
+            queue_from_in_flight = in_flight_value - active_workers
+            estimated_queue += queue_from_in_flight
+            estimation_factors.append(f'in_flight_excess:{queue_from_in_flight}')
+            
+            logger.debug(
+                "Estimated queue from in-flight vs active workers",
+                in_flight_requests=in_flight_value,
+                active_workers=active_workers,
+                queue_estimate_component=queue_from_in_flight
+            )
+        
+        # Factor 2: If all workers are active but we have capacity, estimate based on utilization
+        if active_workers == total_workers and total_workers > 0:
+            # High utilization suggests potential queuing
+            utilization_queue_estimate = max(0, int(total_workers * 0.1))  # 10% of worker count as heuristic
+            estimated_queue += utilization_queue_estimate
+            estimation_factors.append(f'high_utilization:{utilization_queue_estimate}')
+            
+            logger.debug(
+                "Estimated queue from high worker utilization",
+                worker_utilization="100%",
+                total_workers=total_workers,
+                utilization_queue_estimate=utilization_queue_estimate
+            )
+        
+        # Factor 3: Conservative minimum - if we have any in-flight requests and active workers,
+        # there's a small chance of queuing
+        if in_flight_value > 0 and active_workers > 0 and estimated_queue == 0:
+            conservative_estimate = max(0, (in_flight_value - 1) // 2)  # Very conservative
+            estimated_queue += conservative_estimate
+            estimation_factors.append(f'conservative:{conservative_estimate}')
+            
+            logger.debug(
+                "Applied conservative queue estimation",
+                conservative_estimate=conservative_estimate,
+                reasoning="active_requests_with_workers_but_no_clear_queue"
+            )
+        
+        if estimation_factors:
+            logger.debug(
+                "Successfully estimated queue depth from metrics correlation",
+                estimated_queue=estimated_queue,
+                estimation_factors=estimation_factors,
+                confidence_level='medium_heuristic',
+                input_metrics={
+                    'in_flight_requests': in_flight_value,
+                    'active_workers': active_workers,
+                    'total_workers': total_workers
+                }
+            )
+            return estimated_queue
+        else:
+            logger.debug(
+                "No queue estimation possible from metrics correlation",
+                in_flight_requests=in_flight_value,
+                active_workers=active_workers,
+                total_workers=total_workers,
+                reason="insufficient_correlation_indicators"
+            )
+            return None
+            
+    except Exception as e:
+        logger.error(
+            "Unexpected error estimating queue from metrics correlation",
+            error=str(e),
+            error_type=type(e).__name__,
+            fallback_result=None,
+            estimation_stage="metrics_correlation_analysis",
+            exc_info=True
+        )
+        return None
         if hasattr(loop, '_ready'):
             try:
                 ready_tasks = len(loop._ready)
@@ -2805,3 +3134,955 @@ logger.info(f"Metrics registry contains {len(_METRICS_REGISTRY)} metrics")
 if logger.logger.isEnabledFor(10):  # DEBUG level
     for name, status in get_metric_status().items():
         logger.debug(f"Metric {name}: {status}")
+
+
+def _detect_uvicorn_thread_pool() -> Dict[str, Any]:
+    """
+    Detect Uvicorn's thread pool configuration and current state.
+    
+    Returns information about:
+    - Current thread pool size
+    - Maximum configured threads
+    - Thread pool executor state
+    
+    Returns:
+        Dictionary with thread pool information or empty dict on failure
+    """
+    try:
+        import gc
+        import sys
+        
+        logger.debug(
+            "Starting Uvicorn thread pool detection",
+            detection_method="garbage_collector_inspection"
+        )
+        
+        # Look for Uvicorn server instances in the garbage collector
+        uvicorn_servers = []
+        
+        try:
+            for obj in gc.get_objects():
+                # Look for Uvicorn server objects
+                if hasattr(obj, '__class__') and obj.__class__.__name__ == 'Server':
+                    module_name = getattr(obj.__class__, '__module__', '')
+                    if 'uvicorn' in module_name.lower():
+                        uvicorn_servers.append(obj)
+                        logger.debug(
+                            "Found Uvicorn server instance",
+                            server_class=obj.__class__.__name__,
+                            server_module=module_name,
+                            server_id=id(obj)
+                        )
+        except Exception as e:
+            logger.debug(
+                "Error during garbage collection inspection for Uvicorn servers",
+                error=str(e),
+                error_type=type(e).__name__
+            )
+            return {}
+        
+        if not uvicorn_servers:
+            logger.debug(
+                "No Uvicorn server instances found",
+                gc_objects_checked=True,
+                fallback_action="return_empty_dict"
+            )
+            return {}
+        
+        # Examine the first Uvicorn server instance
+        server = uvicorn_servers[0]
+        thread_pool_info = {}
+        
+        try:
+            # Try to get configuration information
+            if hasattr(server, 'config'):
+                config = server.config
+                if hasattr(config, 'workers'):
+                    thread_pool_info['configured_workers'] = config.workers
+                    logger.debug(
+                        "Found Uvicorn worker configuration",
+                        configured_workers=config.workers,
+                        source='server.config.workers'
+                    )
+                
+                if hasattr(config, 'limit_concurrency'):
+                    thread_pool_info['limit_concurrency'] = config.limit_concurrency
+                    logger.debug(
+                        "Found Uvicorn concurrency limit",
+                        limit_concurrency=config.limit_concurrency,
+                        source='server.config.limit_concurrency'
+                    )
+        except Exception as e:
+            logger.debug(
+                "Error accessing Uvicorn server configuration",
+                error=str(e),
+                error_type=type(e).__name__
+            )
+        
+        # Try to find thread pool executor information
+        try:
+            # Look for various thread pool related attributes
+            executor_attributes = [
+                'thread_pool_executor',
+                'executor',
+                '_executor',
+                'thread_pool',
+                '_thread_pool'
+            ]
+            
+            for attr_name in executor_attributes:
+                if hasattr(server, attr_name):
+                    executor = getattr(server, attr_name, None)
+                    if executor and hasattr(executor, '_max_workers'):
+                        thread_pool_info['max_workers'] = executor._max_workers
+                        thread_pool_info['detection_source'] = f'server.{attr_name}'
+                        logger.debug(
+                            "Found thread pool executor max workers",
+                            max_workers=executor._max_workers,
+                            attribute=attr_name,
+                            executor_type=type(executor).__name__
+                        )
+                        break
+            
+            # Also try to inspect server attributes more broadly
+            if 'max_workers' not in thread_pool_info:
+                server_attrs = dir(server)
+                thread_related_attrs = [attr for attr in server_attrs if 'thread' in attr.lower() or 'pool' in attr.lower() or 'executor' in attr.lower()]
+                
+                if thread_related_attrs:
+                    logger.debug(
+                        "Found thread-related attributes on Uvicorn server",
+                        thread_related_attributes=thread_related_attrs[:10],  # Limit to first 10
+                        total_found=len(thread_related_attrs)
+                    )
+                    
+                    for attr_name in thread_related_attrs:
+                        try:
+                            attr_value = getattr(server, attr_name, None)
+                            if attr_value and hasattr(attr_value, '_max_workers'):
+                                thread_pool_info['max_workers'] = attr_value._max_workers
+                                thread_pool_info['detection_source'] = f'server.{attr_name}'
+                                logger.debug(
+                                    "Found max workers via attribute inspection",
+                                    max_workers=attr_value._max_workers,
+                                    attribute=attr_name
+                                )
+                                break
+                        except Exception as e:
+                            logger.debug(
+                                "Error inspecting thread-related attribute",
+                                attribute=attr_name,
+                                error=str(e)
+                            )
+                            continue
+        except Exception as e:
+            logger.debug(
+                "Error inspecting Uvicorn server for thread pool executor",
+                error=str(e),
+                error_type=type(e).__name__
+            )
+        
+        if thread_pool_info:
+            logger.debug(
+                "Successfully detected Uvicorn thread pool information",
+                thread_pool_info=thread_pool_info,
+                detection_success=True,
+                server_count=len(uvicorn_servers)
+            )
+        else:
+            logger.debug(
+                "No Uvicorn thread pool information could be extracted",
+                server_found=True,
+                server_count=len(uvicorn_servers),
+                server_attributes_checked=True
+            )
+        
+        return thread_pool_info
+        
+    except Exception as e:
+        logger.error(
+            "Unexpected error detecting Uvicorn thread pool configuration",
+            error=str(e),
+            error_type=type(e).__name__,
+            fallback_result={},
+            detection_stage="uvicorn_server_inspection",
+            exc_info=True
+        )
+        return {}
+
+
+def _get_asyncio_thread_pool_info() -> Dict[str, Any]:
+    """
+    Get information about asyncio's default thread pool executor.
+    
+    FastAPI/Uvicorn uses asyncio's thread pool for blocking operations.
+    
+    Returns:
+        Dictionary with thread pool information or empty dict on failure
+    """
+    try:
+        import asyncio
+        import os
+        from concurrent.futures import ThreadPoolExecutor
+        
+        logger.debug(
+            "Starting asyncio thread pool detection",
+            detection_method="asyncio_loop_inspection"
+        )
+        
+        thread_pool_info = {}
+        
+        # Try to get the current event loop
+        loop = None
+        try:
+            loop = asyncio.get_running_loop()
+            logger.debug(
+                "Found running asyncio event loop",
+                loop_type=type(loop).__name__,
+                loop_running=loop.is_running() if hasattr(loop, 'is_running') else 'unknown'
+            )
+        except RuntimeError:
+            try:
+                loop = asyncio.get_event_loop()
+                logger.debug(
+                    "Found asyncio event loop via get_event_loop",
+                    loop_type=type(loop).__name__
+                )
+            except Exception as e:
+                logger.debug(
+                    "No asyncio event loop available",
+                    error=str(e),
+                    error_type=type(e).__name__
+                )
+                return {}
+        
+        if not loop:
+            logger.debug(
+                "No asyncio loop available for thread pool inspection",
+                fallback_action="return_empty_dict"
+            )
+            return {}
+        
+        # Check if loop has a default executor
+        try:
+            if hasattr(loop, '_default_executor') and loop._default_executor:
+                executor = loop._default_executor
+                thread_pool_info['has_default_executor'] = True
+                thread_pool_info['executor_type'] = type(executor).__name__
+                
+                logger.debug(
+                    "Found asyncio default executor",
+                    executor_type=type(executor).__name__,
+                    executor_id=id(executor)
+                )
+                
+                # Try to get max workers
+                if hasattr(executor, '_max_workers'):
+                    thread_pool_info['max_workers'] = executor._max_workers
+                    logger.debug(
+                        "Found max workers from asyncio executor",
+                        max_workers=executor._max_workers
+                    )
+                
+                # Try to get current thread information
+                if hasattr(executor, '_threads'):
+                    current_threads = len(executor._threads) if executor._threads else 0
+                    thread_pool_info['current_threads'] = current_threads
+                    logger.debug(
+                        "Found current thread count from asyncio executor",
+                        current_threads=current_threads
+                    )
+                
+                # Try to get idle thread information
+                if hasattr(executor, '_idle_semaphore') and hasattr(executor._idle_semaphore, '_value'):
+                    idle_threads = executor._idle_semaphore._value
+                    thread_pool_info['idle_threads'] = idle_threads
+                    logger.debug(
+                        "Found idle thread count from asyncio executor",
+                        idle_threads=idle_threads
+                    )
+                
+                thread_pool_info['detection_source'] = 'asyncio_default_executor'
+            else:
+                thread_pool_info['has_default_executor'] = False
+                logger.debug(
+                    "Asyncio loop has no default executor",
+                    loop_has_default_executor_attr=hasattr(loop, '_default_executor'),
+                    default_executor_value=getattr(loop, '_default_executor', 'not_present')
+                )
+        except Exception as e:
+            logger.debug(
+                "Error inspecting asyncio default executor",
+                error=str(e),
+                error_type=type(e).__name__
+            )
+        
+        # Add system default information for context
+        try:
+            cpu_count = os.cpu_count() or 4
+            # AsyncIO default is min(32, (os.cpu_count() or 1) + 4)
+            system_default_max_workers = min(32, cpu_count + 4)
+            thread_pool_info['system_default_max_workers'] = system_default_max_workers
+            thread_pool_info['cpu_count'] = cpu_count
+            
+            logger.debug(
+                "Added system default thread pool information",
+                cpu_count=cpu_count,
+                system_default_max_workers=system_default_max_workers,
+                calculation="min(32, cpu_count + 4)"
+            )
+        except Exception as e:
+            logger.debug(
+                "Error calculating system default thread pool size",
+                error=str(e),
+                error_type=type(e).__name__
+            )
+        
+        if thread_pool_info:
+            logger.debug(
+                "Successfully detected asyncio thread pool information",
+                thread_pool_info=thread_pool_info,
+                detection_success=True
+            )
+        else:
+            logger.debug(
+                "No asyncio thread pool information could be detected",
+                loop_available=loop is not None,
+                loop_type=type(loop).__name__ if loop else None
+            )
+        
+        return thread_pool_info
+        
+    except Exception as e:
+        logger.error(
+            "Unexpected error detecting asyncio thread pool information",
+            error=str(e),
+            error_type=type(e).__name__,
+            fallback_result={},
+            detection_stage="asyncio_thread_pool_inspection",
+            exc_info=True
+        )
+        return {}
+
+
+class ThreadMetricsCollector:
+    """
+    Collector that updates thread metrics with comprehensive error handling and throttling.
+    
+    Integrates with Prometheus client's collection mechanism to update
+    thread metrics whenever the /metrics endpoint is scraped or when
+    explicitly triggered.
+    
+    Features:
+    - Update throttling to prevent excessive collection
+    - Comprehensive error handling with fallback mechanisms
+    - Structured logging for debugging and monitoring
+    - Support for both Prometheus and OpenTelemetry metrics
+    """
+    
+    def __init__(self, update_interval: float = 1.0, debug_logging: bool = False):
+        """
+        Initialize the thread metrics collector.
+        
+        Args:
+            update_interval: Minimum interval between updates in seconds
+            debug_logging: Enable debug logging for collection operations
+        """
+        self.last_update = 0.0
+        self.update_interval = update_interval
+        self.debug_logging = debug_logging
+        self.collection_count = 0
+        self.error_count = 0
+        self.last_values = {
+            'active_workers': 0,
+            'total_workers': 0,
+            'max_configured': 0,
+            'queued_requests': 0
+        }
+        
+        logger.info(
+            "ThreadMetricsCollector initialized",
+            update_interval=update_interval,
+            debug_logging=debug_logging,
+            throttling_enabled=True
+        )
+        
+        if debug_logging:
+            logger.debug(
+                "Debug logging enabled for thread metrics collector",
+                collection_features=['throttling', 'error_handling', 'fallback_mechanisms', 'structured_logging']
+            )
+    
+    def collect(self) -> None:
+        """
+        Collect and update all thread metrics with comprehensive error handling.
+        
+        Called by Prometheus client during metrics export or when explicitly triggered.
+        Implements update throttling to prevent excessive collection overhead.
+        """
+        current_time = time.time()
+        
+        # Check if we should skip this update due to throttling
+        if current_time - self.last_update < self.update_interval:
+            if self.debug_logging:
+                logger.debug(
+                    "Skipping thread metrics update due to throttling",
+                    time_since_last_update=round(current_time - self.last_update, 3),
+                    update_interval=self.update_interval,
+                    throttling_reason="too_frequent"
+                )
+            return
+        
+        self.collection_count += 1
+        collection_start_time = time.perf_counter()
+        
+        if self.debug_logging:
+            logger.debug(
+                "Starting thread metrics collection",
+                collection_number=self.collection_count,
+                time_since_last_update=round(current_time - self.last_update, 3),
+                collection_stage="start"
+            )
+        
+        try:
+            # Update all thread metrics with individual error handling
+            self._update_worker_metrics()
+            self._update_queue_metrics()
+            
+            # Update last update time only after successful collection
+            self.last_update = current_time
+            collection_duration = (time.perf_counter() - collection_start_time) * 1000
+            
+            logger.debug(
+                "Successfully completed thread metrics collection",
+                collection_number=self.collection_count,
+                collection_duration_ms=round(collection_duration, 2),
+                error_count=self.error_count,
+                collection_stage="complete"
+            )
+            
+        except Exception as e:
+            self.error_count += 1
+            collection_duration = (time.perf_counter() - collection_start_time) * 1000
+            
+            logger.error(
+                "Critical error during thread metrics collection",
+                error=str(e),
+                error_type=type(e).__name__,
+                collection_number=self.collection_count,
+                error_count=self.error_count,
+                collection_duration_ms=round(collection_duration, 2),
+                impact="thread_metrics_may_be_stale",
+                mitigation="will_retry_on_next_collection",
+                exc_info=True
+            )
+            
+            # Don't update last_update time on error so we'll retry sooner
+    
+    def _update_worker_metrics(self) -> None:
+        """
+        Update worker thread count metrics for both Prometheus and OpenTelemetry.
+        
+        Handles errors gracefully and provides fallback values to ensure
+        metrics remain available even when detection fails.
+        """
+        try:
+            # Get current worker counts with individual error handling
+            active_count = self._safe_get_active_worker_count()
+            total_count = self._safe_get_total_worker_count()
+            max_configured = self._safe_get_max_configured_workers()
+            
+            if self.debug_logging:
+                logger.debug(
+                    "Retrieved worker thread counts",
+                    active_workers=active_count,
+                    total_workers=total_count,
+                    max_configured=max_configured,
+                    utilization_percent=round((active_count / max(total_count, 1)) * 100, 1) if total_count > 0 else 0
+                )
+            
+            # Update Prometheus metrics with error handling
+            self._update_prometheus_worker_metrics(active_count, total_count, max_configured)
+            
+            # Update OpenTelemetry metrics with error handling
+            self._update_otel_worker_metrics(active_count, total_count, max_configured)
+            
+            # Store current values for debugging and comparison
+            self.last_values.update({
+                'active_workers': active_count,
+                'total_workers': total_count,
+                'max_configured': max_configured
+            })
+            
+        except Exception as e:
+            logger.error(
+                "Error updating worker thread metrics",
+                error=str(e),
+                error_type=type(e).__name__,
+                fallback_action="use_previous_values",
+                impact="worker_metrics_may_be_stale",
+                exc_info=True
+            )
+    
+    def _update_queue_metrics(self) -> None:
+        """
+        Update request queue depth metrics for both Prometheus and OpenTelemetry.
+        
+        Handles errors gracefully and provides fallback values to ensure
+        metrics remain available even when queue detection fails.
+        """
+        try:
+            # Get current queue depth with error handling
+            queued_count = self._safe_get_queued_requests_count()
+            
+            if self.debug_logging:
+                logger.debug(
+                    "Retrieved request queue depth",
+                    queued_requests=queued_count,
+                    queue_detection_success=True
+                )
+            
+            # Update Prometheus metrics with error handling
+            self._update_prometheus_queue_metrics(queued_count)
+            
+            # Update OpenTelemetry metrics with error handling
+            self._update_otel_queue_metrics(queued_count)
+            
+            # Store current value for debugging and comparison
+            self.last_values['queued_requests'] = queued_count
+            
+        except Exception as e:
+            logger.error(
+                "Error updating request queue metrics",
+                error=str(e),
+                error_type=type(e).__name__,
+                fallback_action="use_previous_value",
+                impact="queue_metrics_may_be_stale",
+                exc_info=True
+            )
+    
+    def _safe_get_active_worker_count(self) -> int:
+        """Safely get active worker count with error handling and fallback."""
+        try:
+            count = get_active_worker_count()
+            if count < 0:
+                logger.warning(
+                    "Active worker count is negative, using fallback",
+                    reported_count=count,
+                    fallback_count=0
+                )
+                return 0
+            return count
+        except Exception as e:
+            logger.debug(
+                "Error getting active worker count, using fallback",
+                error=str(e),
+                error_type=type(e).__name__,
+                fallback_count=self.last_values.get('active_workers', 0)
+            )
+            return self.last_values.get('active_workers', 0)
+    
+    def _safe_get_total_worker_count(self) -> int:
+        """Safely get total worker count with error handling and fallback."""
+        try:
+            count = get_total_worker_count()
+            if count < 0:
+                logger.warning(
+                    "Total worker count is negative, using fallback",
+                    reported_count=count,
+                    fallback_count=0
+                )
+                return 0
+            return count
+        except Exception as e:
+            logger.debug(
+                "Error getting total worker count, using fallback",
+                error=str(e),
+                error_type=type(e).__name__,
+                fallback_count=self.last_values.get('total_workers', 0)
+            )
+            return self.last_values.get('total_workers', 0)
+    
+    def _safe_get_max_configured_workers(self) -> int:
+        """Safely get max configured workers with error handling and fallback."""
+        try:
+            count = get_max_configured_workers()
+            if count < 0:
+                logger.warning(
+                    "Max configured workers is negative, using fallback",
+                    reported_count=count,
+                    fallback_count=8
+                )
+                return 8
+            return count
+        except Exception as e:
+            # Use conservative fallback of 8 if no previous value exists
+            fallback_count = max(self.last_values.get('max_configured', 8), 8)
+            logger.debug(
+                "Error getting max configured workers, using fallback",
+                error=str(e),
+                error_type=type(e).__name__,
+                fallback_count=fallback_count
+            )
+            return fallback_count
+    
+    def _safe_get_queued_requests_count(self) -> int:
+        """Safely get queued requests count with error handling and fallback."""
+        try:
+            count = get_queued_requests_count()
+            if count < 0:
+                logger.warning(
+                    "Queued requests count is negative, using fallback",
+                    reported_count=count,
+                    fallback_count=0
+                )
+                return 0
+            return count
+        except Exception as e:
+            logger.debug(
+                "Error getting queued requests count, using fallback",
+                error=str(e),
+                error_type=type(e).__name__,
+                fallback_count=self.last_values.get('queued_requests', 0)
+            )
+            return self.last_values.get('queued_requests', 0)
+    
+    def _update_prometheus_worker_metrics(self, active_count: int, total_count: int, max_configured: int) -> None:
+        """Update Prometheus worker metrics with individual error handling."""
+        # Update active workers gauge
+        try:
+            HTTP_WORKERS_ACTIVE.set(active_count)
+            if self.debug_logging:
+                logger.debug(
+                    "Updated Prometheus active workers gauge",
+                    active_workers=active_count
+                )
+        except Exception as e:
+            logger.error(
+                "Failed to update Prometheus active workers gauge",
+                error=str(e),
+                error_type=type(e).__name__,
+                active_workers=active_count,
+                impact="prometheus_active_workers_metric_stale"
+            )
+        
+        # Update total workers gauge
+        try:
+            HTTP_WORKERS_TOTAL.set(total_count)
+            if self.debug_logging:
+                logger.debug(
+                    "Updated Prometheus total workers gauge",
+                    total_workers=total_count
+                )
+        except Exception as e:
+            logger.error(
+                "Failed to update Prometheus total workers gauge",
+                error=str(e),
+                error_type=type(e).__name__,
+                total_workers=total_count,
+                impact="prometheus_total_workers_metric_stale"
+            )
+        
+        # Update max configured workers gauge
+        try:
+            HTTP_WORKERS_MAX_CONFIGURED.set(max_configured)
+            if self.debug_logging:
+                logger.debug(
+                    "Updated Prometheus max configured workers gauge",
+                    max_configured=max_configured
+                )
+        except Exception as e:
+            logger.error(
+                "Failed to update Prometheus max configured workers gauge",
+                error=str(e),
+                error_type=type(e).__name__,
+                max_configured=max_configured,
+                impact="prometheus_max_workers_metric_stale"
+            )
+    
+    def _update_prometheus_queue_metrics(self, queued_count: int) -> None:
+        """Update Prometheus queue metrics with error handling."""
+        try:
+            HTTP_REQUESTS_QUEUED.set(queued_count)
+            if self.debug_logging:
+                logger.debug(
+                    "Updated Prometheus queued requests gauge",
+                    queued_requests=queued_count
+                )
+        except Exception as e:
+            logger.error(
+                "Failed to update Prometheus queued requests gauge",
+                error=str(e),
+                error_type=type(e).__name__,
+                queued_requests=queued_count,
+                impact="prometheus_queue_metric_stale"
+            )
+    
+    def _update_otel_worker_metrics(self, active_count: int, total_count: int, max_configured: int) -> None:
+        """Update OpenTelemetry worker metrics with individual error handling."""
+        # Update active workers UpDownCounter
+        try:
+            # Calculate delta from last known value
+            last_active = self.last_values.get('active_workers', 0)
+            delta_active = active_count - last_active
+            if delta_active != 0:
+                otel_http_workers_active.add(delta_active)
+                if self.debug_logging:
+                    logger.debug(
+                        "Updated OpenTelemetry active workers counter",
+                        active_workers=active_count,
+                        delta=delta_active
+                    )
+        except Exception as e:
+            logger.error(
+                "Failed to update OpenTelemetry active workers counter",
+                error=str(e),
+                error_type=type(e).__name__,
+                active_workers=active_count,
+                impact="otel_active_workers_metric_stale"
+            )
+        
+        # Update total workers UpDownCounter
+        try:
+            last_total = self.last_values.get('total_workers', 0)
+            delta_total = total_count - last_total
+            if delta_total != 0:
+                otel_http_workers_total.add(delta_total)
+                if self.debug_logging:
+                    logger.debug(
+                        "Updated OpenTelemetry total workers counter",
+                        total_workers=total_count,
+                        delta=delta_total
+                    )
+        except Exception as e:
+            logger.error(
+                "Failed to update OpenTelemetry total workers counter",
+                error=str(e),
+                error_type=type(e).__name__,
+                total_workers=total_count,
+                impact="otel_total_workers_metric_stale"
+            )
+        
+        # Update max configured workers UpDownCounter
+        try:
+            last_max = self.last_values.get('max_configured', 0)
+            delta_max = max_configured - last_max
+            if delta_max != 0:
+                otel_http_workers_max_configured.add(delta_max)
+                if self.debug_logging:
+                    logger.debug(
+                        "Updated OpenTelemetry max configured workers counter",
+                        max_configured=max_configured,
+                        delta=delta_max
+                    )
+        except Exception as e:
+            logger.error(
+                "Failed to update OpenTelemetry max configured workers counter",
+                error=str(e),
+                error_type=type(e).__name__,
+                max_configured=max_configured,
+                impact="otel_max_workers_metric_stale"
+            )
+    
+    def _update_otel_queue_metrics(self, queued_count: int) -> None:
+        """Update OpenTelemetry queue metrics with error handling."""
+        try:
+            last_queued = self.last_values.get('queued_requests', 0)
+            delta_queued = queued_count - last_queued
+            if delta_queued != 0:
+                otel_http_requests_queued.add(delta_queued)
+                if self.debug_logging:
+                    logger.debug(
+                        "Updated OpenTelemetry queued requests counter",
+                        queued_requests=queued_count,
+                        delta=delta_queued
+                    )
+        except Exception as e:
+            logger.error(
+                "Failed to update OpenTelemetry queued requests counter",
+                error=str(e),
+                error_type=type(e).__name__,
+                queued_requests=queued_count,
+                impact="otel_queue_metric_stale"
+            )
+    
+    def get_status(self) -> Dict[str, Any]:
+        """
+        Get collector status information for debugging and monitoring.
+        
+        Returns:
+            Dictionary with collector status and statistics
+        """
+        current_time = time.time()
+        return {
+            'collection_count': self.collection_count,
+            'error_count': self.error_count,
+            'last_update': self.last_update,
+            'time_since_last_update': round(current_time - self.last_update, 2),
+            'update_interval': self.update_interval,
+            'debug_logging': self.debug_logging,
+            'last_values': self.last_values.copy(),
+            'error_rate': round(self.error_count / max(self.collection_count, 1), 3) if self.collection_count > 0 else 0
+        }
+
+
+# Global thread metrics collector instance
+thread_metrics_collector = None
+
+
+def setup_thread_metrics(enable_thread_metrics: bool = True, 
+                        thread_metrics_update_interval: float = 1.0,
+                        thread_metrics_debug_logging: bool = False) -> None:
+    """
+    Setup thread metrics collection with comprehensive error handling.
+    
+    Integrates with existing monitoring infrastructure and provides
+    configuration options for enabling/disabling and tuning collection behavior.
+    
+    Args:
+        enable_thread_metrics: Whether to enable thread metrics collection
+        thread_metrics_update_interval: Update interval in seconds
+        thread_metrics_debug_logging: Enable debug logging for thread metrics
+    """
+    global thread_metrics_collector
+    
+    try:
+        if not enable_thread_metrics:
+            logger.info(
+                "Thread metrics collection disabled via configuration",
+                enable_thread_metrics=False,
+                reason="configuration_setting"
+            )
+            return
+        
+        logger.info(
+            "Setting up thread metrics collection",
+            enable_thread_metrics=enable_thread_metrics,
+            update_interval=thread_metrics_update_interval,
+            debug_logging=thread_metrics_debug_logging
+        )
+        
+        # Create thread metrics collector instance
+        try:
+            thread_metrics_collector = ThreadMetricsCollector(
+                update_interval=thread_metrics_update_interval,
+                debug_logging=thread_metrics_debug_logging
+            )
+            
+            logger.info(
+                "Thread metrics collector created successfully",
+                collector_type=type(thread_metrics_collector).__name__,
+                update_interval=thread_metrics_update_interval,
+                debug_logging=thread_metrics_debug_logging
+            )
+        except Exception as e:
+            logger.error(
+                "Failed to create thread metrics collector",
+                error=str(e),
+                error_type=type(e).__name__,
+                fallback_action="disable_thread_metrics",
+                exc_info=True
+            )
+            return
+        
+        # Register collector with Prometheus registry
+        try:
+            from prometheus_client import REGISTRY
+            
+            # Check if already registered to avoid duplicate registration
+            if thread_metrics_collector not in REGISTRY._collector_to_names:
+                REGISTRY.register(thread_metrics_collector)
+                logger.info(
+                    "Thread metrics collector registered with Prometheus registry",
+                    registry_type="prometheus_client",
+                    collector_registered=True
+                )
+            else:
+                logger.debug(
+                    "Thread metrics collector already registered with Prometheus registry",
+                    registry_type="prometheus_client",
+                    collector_registered=True
+                )
+        except Exception as e:
+            logger.error(
+                "Failed to register thread metrics collector with Prometheus registry",
+                error=str(e),
+                error_type=type(e).__name__,
+                impact="thread_metrics_collection_disabled",
+                mitigation="manual_collection_still_possible",
+                exc_info=True
+            )
+            # Don't return here - collector can still be used manually
+        
+        # Perform initial collection to verify everything works
+        try:
+            thread_metrics_collector.collect()
+            logger.info(
+                "Thread metrics collection setup completed successfully",
+                initial_collection_success=True,
+                collector_status=thread_metrics_collector.get_status()
+            )
+        except Exception as e:
+            logger.warning(
+                "Initial thread metrics collection failed but setup completed",
+                error=str(e),
+                error_type=type(e).__name__,
+                impact="first_metrics_may_be_missing",
+                mitigation="will_retry_on_next_scrape"
+            )
+        
+    except Exception as e:
+        logger.error(
+            "Critical error during thread metrics setup",
+            error=str(e),
+            error_type=type(e).__name__,
+            impact="thread_metrics_completely_disabled",
+            fallback_action="continue_without_thread_metrics",
+            exc_info=True
+        )
+
+
+def get_thread_metrics_status() -> Dict[str, Any]:
+    """
+    Get current thread metrics system status for debugging and monitoring.
+    
+    Returns:
+        Dictionary with thread metrics system status information
+    """
+    try:
+        if thread_metrics_collector is None:
+            return {
+                'enabled': False,
+                'collector_status': 'not_initialized',
+                'reason': 'setup_not_called_or_disabled'
+            }
+        
+        status = {
+            'enabled': True,
+            'collector_status': 'active',
+            'collector_info': thread_metrics_collector.get_status()
+        }
+        
+        # Add current metric values if available
+        try:
+            status['current_metrics'] = {
+                'active_workers': get_active_worker_count(),
+                'total_workers': get_total_worker_count(),
+                'max_configured': get_max_configured_workers(),
+                'queued_requests': get_queued_requests_count()
+            }
+        except Exception as e:
+            status['current_metrics'] = {
+                'error': str(e),
+                'error_type': type(e).__name__
+            }
+        
+        return status
+        
+    except Exception as e:
+        return {
+            'enabled': False,
+            'collector_status': 'error',
+            'error': str(e),
+            'error_type': type(e).__name__
+        }
