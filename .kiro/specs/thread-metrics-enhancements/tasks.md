@@ -35,7 +35,7 @@
   - Write unit tests for queue detection and estimation logic
   - _Requirements: 1.4, 4.4, 5.5_
 
-- [ ] 5. Create ThreadMetricsCollector class with update throttling
+- [x] 5. Create ThreadMetricsCollector class with update throttling
   - Implement `ThreadMetricsCollector` class that integrates with Prometheus collection mechanism
   - Add update throttling with configurable interval (default 1 second) to prevent excessive collection
   - Implement `collect()` method that updates both Prometheus and OpenTelemetry metrics

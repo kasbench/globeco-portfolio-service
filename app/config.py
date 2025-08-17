@@ -11,6 +11,11 @@ class Settings(BaseSettings):
     # Enhanced HTTP Metrics Configuration
     enable_metrics: bool = Field(default=True, description="Enable enhanced HTTP metrics collection")
     metrics_debug_logging: bool = Field(default=False, description="Enable debug logging for metrics collection")
+    
+    # Thread Metrics Configuration
+    enable_thread_metrics: bool = Field(default=True, description="Enable thread worker metrics collection")
+    thread_metrics_update_interval: float = Field(default=1.0, description="Thread metrics update interval in seconds")
+    thread_metrics_debug_logging: bool = Field(default=False, description="Enable debug logging for thread metrics collection")
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

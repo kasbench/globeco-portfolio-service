@@ -1317,6 +1317,120 @@ def get_metric_status() -> Dict[str, Dict[str, Any]]:
     return status
 
 
+# Global thread metrics collector instance
+_thread_metrics_collector: Optional['ThreadMetricsCollector'] = None
+
+
+def setup_thread_metrics(
+    enable_thread_metrics: bool = True,
+    update_interval: float = 1.0,
+    debug_logging: bool = False
+) -> Optional['ThreadMetricsCollector']:
+    """
+    Setup thread metrics collection.
+    
+    Integrates with existing monitoring infrastructure and creates a
+    ThreadMetricsCollector that updates metrics when Prometheus scrapes.
+    
+    Args:
+        enable_thread_metrics: Whether to enable thread metrics collection
+        update_interval: Update interval in seconds for throttling
+        debug_logging: Enable debug logging for thread metrics
+        
+    Returns:
+        ThreadMetricsCollector instance if enabled, None if disabled
+    """
+    global _thread_metrics_collector
+    
+    if not enable_thread_metrics:
+        logger.info(
+            "Thread metrics collection disabled via configuration",
+            enable_thread_metrics=False,
+            reason="configuration_setting"
+        )
+        # Reset global collector when disabled
+        _thread_metrics_collector = None
+        return None
+    
+    try:
+        # Create the thread metrics collector
+        _thread_metrics_collector = ThreadMetricsCollector(update_interval=update_interval)
+        
+        # Register collector with Prometheus registry to trigger updates on scrape
+        from prometheus_client import REGISTRY
+        
+        # Check if collector is already registered to avoid duplicate registration
+        try:
+            REGISTRY.register(_thread_metrics_collector)
+            logger.info(
+                "Thread metrics collector registered with Prometheus registry",
+                update_interval=update_interval,
+                debug_logging=debug_logging,
+                registration_successful=True
+            )
+        except ValueError as e:
+            if "Duplicated timeseries" in str(e) or "already registered" in str(e).lower():
+                logger.warning(
+                    "Thread metrics collector already registered - continuing with existing registration",
+                    error=str(e),
+                    registration_status="already_registered"
+                )
+            else:
+                raise
+        
+        # Log successful setup
+        logger.info(
+            "Thread metrics collection enabled successfully",
+            collector_type="ThreadMetricsCollector",
+            update_interval=update_interval,
+            debug_logging=debug_logging,
+            metrics_collected=[
+                "http_workers_active",
+                "http_workers_total", 
+                "http_workers_max_configured",
+                "http_requests_queued"
+            ],
+            prometheus_integration=True,
+            opentelemetry_integration=True
+        )
+        
+        return _thread_metrics_collector
+        
+    except Exception as e:
+        logger.error(
+            "Failed to setup thread metrics collection",
+            error=str(e),
+            error_type=type(e).__name__,
+            enable_thread_metrics=enable_thread_metrics,
+            update_interval=update_interval,
+            debug_logging=debug_logging,
+            fallback_action="thread_metrics_disabled",
+            exc_info=True
+        )
+        _thread_metrics_collector = None
+        return None
+
+
+def get_thread_metrics_collector() -> Optional['ThreadMetricsCollector']:
+    """
+    Get the current thread metrics collector instance.
+    
+    Returns:
+        ThreadMetricsCollector instance if setup, None if not enabled
+    """
+    return _thread_metrics_collector
+
+
+def is_thread_metrics_enabled() -> bool:
+    """
+    Check if thread metrics collection is currently enabled.
+    
+    Returns:
+        True if thread metrics collector is active
+    """
+    return _thread_metrics_collector is not None
+
+
 def _extract_route_pattern(request: Request) -> str:
     """
     Extract route pattern from request URL to prevent high cardinality metrics.
@@ -1802,6 +1916,333 @@ def _format_status_code(status_code: int) -> str:
             exc_info=True
         )
         return "unknown"
+
+
+class ThreadMetricsCollector:
+    """
+    Collector that updates thread metrics on demand with throttling.
+    
+    This collector integrates with Prometheus collection mechanism to update
+    thread metrics whenever the /metrics endpoint is scraped. It includes
+    update throttling to prevent excessive collection and handles both
+    Prometheus and OpenTelemetry metrics.
+    """
+    
+    def __init__(self, update_interval: float = 1.0):
+        """
+        Initialize the thread metrics collector.
+        
+        Args:
+            update_interval: Minimum interval between updates in seconds (default: 1.0)
+        """
+        self.update_interval = update_interval
+        self.last_update = 0.0
+        
+        # Track OpenTelemetry metric values for delta updates
+        self._otel_values = {
+            'workers_active': 0,
+            'workers_total': 0,
+            'workers_max_configured': 0,
+            'requests_queued': 0
+        }
+        
+        logger.info(
+            "ThreadMetricsCollector initialized",
+            update_interval=self.update_interval,
+            throttling_enabled=True,
+            metrics_tracked=list(self._otel_values.keys())
+        )
+    
+    def collect(self):
+        """
+        Collect and update all thread metrics.
+        
+        Called by Prometheus client during metrics export. Implements
+        throttling to prevent excessive updates and handles both
+        Prometheus and OpenTelemetry metrics.
+        """
+        current_time = time.time()
+        
+        # Check if we should skip update due to throttling
+        if current_time - self.last_update < self.update_interval:
+            logger.debug(
+                "Skipping thread metrics update due to throttling",
+                time_since_last_update=current_time - self.last_update,
+                update_interval=self.update_interval,
+                throttling_active=True
+            )
+            return
+        
+        logger.debug(
+            "Starting thread metrics collection",
+            time_since_last_update=current_time - self.last_update,
+            throttling_bypassed=True
+        )
+        
+        # Update worker thread metrics (with individual error handling)
+        try:
+            self._update_worker_metrics()
+        except Exception as e:
+            logger.error(
+                "Failed to update worker metrics during collection",
+                error=str(e),
+                error_type=type(e).__name__,
+                impact="worker_metrics_may_be_stale",
+                exc_info=True
+            )
+        
+        # Update request queue metrics (with individual error handling)
+        try:
+            self._update_queue_metrics()
+        except Exception as e:
+            logger.error(
+                "Failed to update queue metrics during collection",
+                error=str(e),
+                error_type=type(e).__name__,
+                impact="queue_metrics_may_be_stale",
+                exc_info=True
+            )
+        
+        # Update last update timestamp
+        self.last_update = current_time
+        
+        logger.debug(
+            "Thread metrics collection completed",
+            collection_time=time.time() - current_time,
+            next_update_allowed_at=self.last_update + self.update_interval
+        )
+    
+    def _update_worker_metrics(self):
+        """
+        Update worker thread count metrics for both Prometheus and OpenTelemetry.
+        
+        Collects current worker thread counts and updates both metric systems
+        with proper error handling and delta calculations for OpenTelemetry.
+        """
+        try:
+            # Get current worker thread counts
+            active_count = get_active_worker_count()
+            total_count = get_total_worker_count()
+            max_configured = get_max_configured_workers()
+            
+            logger.debug(
+                "Collected worker thread counts",
+                active_workers=active_count,
+                total_workers=total_count,
+                max_configured_workers=max_configured
+            )
+            
+            # Update Prometheus metrics (for /metrics endpoint)
+            try:
+                HTTP_WORKERS_ACTIVE.set(active_count)
+                HTTP_WORKERS_TOTAL.set(total_count)
+                HTTP_WORKERS_MAX_CONFIGURED.set(max_configured)
+                
+                logger.debug(
+                    "Updated Prometheus worker metrics",
+                    active_workers=active_count,
+                    total_workers=total_count,
+                    max_configured_workers=max_configured
+                )
+                
+            except Exception as e:
+                logger.error(
+                    "Failed to update Prometheus worker metrics",
+                    error=str(e),
+                    error_type=type(e).__name__,
+                    active_count=active_count,
+                    total_count=total_count,
+                    max_configured=max_configured,
+                    exc_info=True
+                )
+            
+            # Update OpenTelemetry metrics (for collector export)
+            try:
+                # Calculate deltas for UpDownCounter metrics
+                active_delta = active_count - self._otel_values['workers_active']
+                total_delta = total_count - self._otel_values['workers_total']
+                max_configured_delta = max_configured - self._otel_values['workers_max_configured']
+                
+                # Update OpenTelemetry metrics with deltas
+                if active_delta != 0:
+                    otel_http_workers_active.add(active_delta)
+                    self._otel_values['workers_active'] = active_count
+                
+                if total_delta != 0:
+                    otel_http_workers_total.add(total_delta)
+                    self._otel_values['workers_total'] = total_count
+                
+                if max_configured_delta != 0:
+                    otel_http_workers_max_configured.add(max_configured_delta)
+                    self._otel_values['workers_max_configured'] = max_configured
+                
+                logger.debug(
+                    "Updated OpenTelemetry worker metrics",
+                    active_delta=active_delta,
+                    total_delta=total_delta,
+                    max_configured_delta=max_configured_delta,
+                    new_otel_values={
+                        'active': self._otel_values['workers_active'],
+                        'total': self._otel_values['workers_total'],
+                        'max_configured': self._otel_values['workers_max_configured']
+                    }
+                )
+                
+            except Exception as e:
+                logger.error(
+                    "Failed to update OpenTelemetry worker metrics",
+                    error=str(e),
+                    error_type=type(e).__name__,
+                    active_count=active_count,
+                    total_count=total_count,
+                    max_configured=max_configured,
+                    current_otel_values=self._otel_values.copy(),
+                    exc_info=True
+                )
+                
+        except Exception as e:
+            logger.error(
+                "Failed to collect worker thread counts",
+                error=str(e),
+                error_type=type(e).__name__,
+                impact="worker_metrics_not_updated",
+                exc_info=True
+            )
+    
+    def _update_queue_metrics(self):
+        """
+        Update request queue depth metrics for both Prometheus and OpenTelemetry.
+        
+        Collects current request queue depth and updates both metric systems
+        with proper error handling and delta calculations for OpenTelemetry.
+        """
+        try:
+            # Get current queue depth
+            queued_count = get_queued_requests_count()
+            
+            logger.debug(
+                "Collected request queue depth",
+                queued_requests=queued_count
+            )
+            
+            # Update Prometheus metrics (for /metrics endpoint)
+            try:
+                HTTP_REQUESTS_QUEUED.set(queued_count)
+                
+                logger.debug(
+                    "Updated Prometheus queue metrics",
+                    queued_requests=queued_count
+                )
+                
+            except Exception as e:
+                logger.error(
+                    "Failed to update Prometheus queue metrics",
+                    error=str(e),
+                    error_type=type(e).__name__,
+                    queued_count=queued_count,
+                    exc_info=True
+                )
+            
+            # Update OpenTelemetry metrics (for collector export)
+            try:
+                # Calculate delta for UpDownCounter metric
+                queued_delta = queued_count - self._otel_values['requests_queued']
+                
+                # Update OpenTelemetry metric with delta
+                if queued_delta != 0:
+                    otel_http_requests_queued.add(queued_delta)
+                    self._otel_values['requests_queued'] = queued_count
+                
+                logger.debug(
+                    "Updated OpenTelemetry queue metrics",
+                    queued_delta=queued_delta,
+                    new_otel_value=self._otel_values['requests_queued']
+                )
+                
+            except Exception as e:
+                logger.error(
+                    "Failed to update OpenTelemetry queue metrics",
+                    error=str(e),
+                    error_type=type(e).__name__,
+                    queued_count=queued_count,
+                    current_otel_value=self._otel_values['requests_queued'],
+                    exc_info=True
+                )
+                
+        except Exception as e:
+            logger.error(
+                "Failed to collect request queue depth",
+                error=str(e),
+                error_type=type(e).__name__,
+                impact="queue_metrics_not_updated",
+                exc_info=True
+            )
+    
+    def get_last_update_time(self) -> float:
+        """
+        Get the timestamp of the last metrics update.
+        
+        Returns:
+            Timestamp of last update (0.0 if never updated)
+        """
+        return self.last_update
+    
+    def get_update_interval(self) -> float:
+        """
+        Get the configured update interval.
+        
+        Returns:
+            Update interval in seconds
+        """
+        return self.update_interval
+    
+    def set_update_interval(self, interval: float):
+        """
+        Set a new update interval.
+        
+        Args:
+            interval: New update interval in seconds
+        """
+        if interval <= 0:
+            raise ValueError("Update interval must be positive")
+        
+        old_interval = self.update_interval
+        self.update_interval = interval
+        
+        logger.info(
+            "Thread metrics collector update interval changed",
+            old_interval=old_interval,
+            new_interval=self.update_interval
+        )
+    
+    def force_update(self):
+        """
+        Force an immediate metrics update, bypassing throttling.
+        
+        This method should be used sparingly and primarily for testing
+        or when immediate metrics updates are required.
+        """
+        logger.info(
+            "Forcing immediate thread metrics update",
+            bypassing_throttling=True,
+            time_since_last_update=time.time() - self.last_update
+        )
+        
+        # Temporarily reset last_update to force collection
+        original_last_update = self.last_update
+        self.last_update = 0.0
+        
+        # Call collect which will update the timestamp
+        self.collect()
+    
+    def get_current_otel_values(self) -> Dict[str, int]:
+        """
+        Get the current OpenTelemetry metric values being tracked.
+        
+        Returns:
+            Dictionary of current OpenTelemetry metric values
+        """
+        return self._otel_values.copy()
 
 
 class EnhancedHTTPMetricsMiddleware(BaseHTTPMiddleware):
