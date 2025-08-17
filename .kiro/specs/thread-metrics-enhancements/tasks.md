@@ -26,7 +26,7 @@
   - Write unit tests for thread pool configuration detection
   - _Requirements: 1.3, 4.3, 4.4_
 
-- [ ] 4. Implement request queue depth detection
+- [x] 4. Implement request queue depth detection
   - Create `get_queued_requests_count()` function with multiple detection approaches
   - Implement `_detect_request_queue_depth()` with fallback mechanisms
   - Add `_estimate_queue_from_metrics()` using existing HTTP metrics correlation

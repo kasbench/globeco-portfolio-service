@@ -632,6 +632,473 @@ def get_max_configured_workers() -> int:
         return 8  # Conservative fallback
 
 
+def get_queued_requests_count() -> int:
+    """
+    Count pending requests waiting for thread assignment.
+    
+    Uses multiple detection approaches with fallback mechanisms:
+    1. Uvicorn server queue inspection
+    2. AsyncIO task queue analysis
+    3. System-level connection queue detection
+    4. Estimation from existing HTTP metrics correlation
+    
+    Returns:
+        Number of requests waiting in queue, 0 on error or when no queue detected
+    """
+    try:
+        # Try multiple approaches in order of reliability
+        detection_approaches = [
+            _detect_uvicorn_queue,
+            _detect_asyncio_queue,
+            _detect_system_level_queue,
+            _estimate_queue_from_metrics
+        ]
+        
+        for approach in detection_approaches:
+            try:
+                result = approach()
+                if result is not None and result >= 0:
+                    try:
+                        logger.debug(
+                            "Successfully detected queue depth",
+                            approach=approach.__name__,
+                            queue_depth=result
+                        )
+                    except Exception:
+                        # Ignore logger errors
+                        pass
+                    return result
+            except Exception as e:
+                try:
+                    logger.debug(
+                        "Queue detection approach failed",
+                        approach=approach.__name__,
+                        error=str(e),
+                        error_type=type(e).__name__
+                    )
+                except Exception:
+                    # Ignore logger errors
+                    pass
+                continue
+        
+        # All approaches failed, return safe fallback
+        try:
+            logger.debug(
+                "All queue detection approaches failed, returning fallback",
+                fallback_result=0
+            )
+        except Exception:
+            # Ignore logger errors
+            pass
+        return 0
+        
+    except Exception as e:
+        try:
+            logger.error(
+                "Failed to detect queued requests count",
+                error=str(e),
+                error_type=type(e).__name__,
+                fallback_result=0,
+                exc_info=True
+            )
+        except Exception:
+            # Ignore logger errors
+            pass
+        return 0
+
+
+def _detect_request_queue_depth() -> int:
+    """
+    Detect the number of requests waiting for thread assignment.
+    
+    This is the main queue detection function that coordinates multiple
+    detection approaches and implements fallback mechanisms.
+    
+    Returns:
+        Number of pending requests or 0 if detection fails
+    """
+    return get_queued_requests_count()
+
+
+def _detect_uvicorn_queue() -> Optional[int]:
+    """
+    Detect request queue depth by inspecting Uvicorn server queue.
+    
+    Attempts to inspect the Uvicorn server's internal request queue
+    to determine how many requests are waiting for thread assignment.
+    
+    Returns:
+        Number of queued requests or None if detection fails
+    """
+    try:
+        import sys
+        import gc
+        
+        # Look for Uvicorn server instances in the garbage collector
+        uvicorn_servers = []
+        
+        for obj in gc.get_objects():
+            # Look for Uvicorn server objects
+            if hasattr(obj, '__class__') and obj.__class__.__name__ == 'Server':
+                module_name = getattr(obj.__class__, '__module__', '')
+                if 'uvicorn' in module_name.lower():
+                    uvicorn_servers.append(obj)
+        
+        if not uvicorn_servers:
+            logger.debug("No Uvicorn server instances found for queue inspection")
+            return None
+        
+        # Examine the first Uvicorn server instance
+        server = uvicorn_servers[0]
+        
+        # Look for various queue-related attributes that might exist
+        queue_attributes = [
+            'request_queue',
+            'pending_requests',
+            'connection_queue',
+            'backlog',
+            '_request_queue',
+            '_pending_requests'
+        ]
+        
+        for attr_name in queue_attributes:
+            if hasattr(server, attr_name):
+                queue_obj = getattr(server, attr_name, None)
+                if queue_obj:
+                    # Try to get queue size
+                    if hasattr(queue_obj, 'qsize') and callable(queue_obj.qsize):
+                        try:
+                            queue_depth = queue_obj.qsize()
+                            logger.debug(
+                                "Found Uvicorn queue via qsize()",
+                                attribute=attr_name,
+                                queue_depth=queue_depth
+                            )
+                            return queue_depth
+                        except Exception as e:
+                            logger.debug(
+                                "Error calling qsize() on queue object",
+                                attribute=attr_name,
+                                error=str(e)
+                            )
+                            continue
+                    elif hasattr(queue_obj, '__len__'):
+                        try:
+                            queue_depth = len(queue_obj)
+                            logger.debug(
+                                "Found Uvicorn queue via len()",
+                                attribute=attr_name,
+                                queue_depth=queue_depth
+                            )
+                            return queue_depth
+                        except Exception as e:
+                            logger.debug(
+                                "Error calling len() on queue object",
+                                attribute=attr_name,
+                                error=str(e)
+                            )
+                            continue
+        
+        # Try to inspect server's socket backlog if available
+        if hasattr(server, 'server') and server.server:
+            server_obj = server.server
+            if hasattr(server_obj, 'sockets'):
+                # This is a more advanced approach that might work with some configurations
+                for socket_obj in server_obj.sockets:
+                    if hasattr(socket_obj, 'getsockopt'):
+                        try:
+                            import socket as socket_module
+                            # Try to get socket queue length (this is system-dependent)
+                            backlog = socket_obj.getsockopt(socket_module.SOL_SOCKET, socket_module.SO_ACCEPTCONN)
+                            if backlog > 0:
+                                logger.debug(
+                                    "Detected socket backlog",
+                                    backlog=backlog
+                                )
+                                return backlog
+                        except Exception as e:
+                            logger.debug(
+                                "Error getting socket backlog",
+                                error=str(e)
+                            )
+                            continue
+        
+        logger.debug("Could not find Uvicorn queue information")
+        return None
+        
+    except Exception as e:
+        logger.debug(
+            "Error detecting Uvicorn queue depth",
+            error=str(e),
+            error_type=type(e).__name__
+        )
+        return None
+
+
+def _detect_asyncio_queue() -> Optional[int]:
+    """
+    Detect request queue depth by analyzing AsyncIO task queue.
+    
+    Inspects the current asyncio event loop to find pending tasks
+    that might represent queued HTTP requests.
+    
+    Returns:
+        Number of queued requests or None if detection fails
+    """
+    try:
+        import asyncio
+        
+        # Try to get the current event loop
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # No running loop
+            logger.debug("No running asyncio event loop found")
+            return None
+        
+        queue_depth = 0
+        found_queue_info = False
+        
+        # Count pending tasks that might be HTTP requests
+        if hasattr(loop, '_scheduled'):
+            try:
+                scheduled_tasks = len(loop._scheduled)
+                logger.debug(
+                    "Found scheduled asyncio tasks",
+                    scheduled_count=scheduled_tasks
+                )
+                queue_depth += scheduled_tasks
+                found_queue_info = True
+            except Exception as e:
+                logger.debug(
+                    "Error accessing scheduled tasks",
+                    error=str(e)
+                )
+        
+        # Check for ready tasks (don't add to queue depth as they're being processed)
+        if hasattr(loop, '_ready'):
+            try:
+                ready_tasks = len(loop._ready)
+                logger.debug(
+                    "Found ready asyncio tasks",
+                    ready_count=ready_tasks
+                )
+                # Don't add ready tasks to queue depth as they're being processed
+            except Exception as e:
+                logger.debug(
+                    "Error accessing ready tasks",
+                    error=str(e)
+                )
+        
+        # Look for thread pool executor queue
+        if hasattr(loop, '_default_executor'):
+            executor = loop._default_executor
+            if executor and hasattr(executor, '_work_queue'):
+                work_queue = executor._work_queue
+                if hasattr(work_queue, 'qsize') and callable(work_queue.qsize):
+                    try:
+                        executor_queue_size = work_queue.qsize()
+                        logger.debug(
+                            "Found thread pool executor queue",
+                            executor_queue_size=executor_queue_size
+                        )
+                        queue_depth += executor_queue_size
+                        found_queue_info = True
+                    except Exception as e:
+                        logger.debug(
+                            "Error getting executor queue size",
+                            error=str(e)
+                        )
+        
+        # Only return a value if we found some meaningful queue information
+        if found_queue_info and queue_depth >= 0:
+            logger.debug(
+                "Detected AsyncIO queue depth",
+                total_queue_depth=queue_depth
+            )
+            return queue_depth
+        
+        return None
+        
+    except Exception as e:
+        logger.debug(
+            "Error detecting AsyncIO queue depth",
+            error=str(e),
+            error_type=type(e).__name__
+        )
+        return None
+
+
+def _detect_system_level_queue() -> Optional[int]:
+    """
+    Detect request queue depth using system-level connection queue detection.
+    
+    Uses system-level tools to inspect network connection queues and
+    socket backlogs that might indicate pending HTTP requests.
+    
+    Returns:
+        Number of queued requests or None if detection fails
+    """
+    try:
+        import socket
+        import os
+        
+        # This is a more advanced approach that tries to inspect system-level queues
+        # In practice, this is quite difficult to implement reliably across different
+        # operating systems and configurations
+        
+        # Try to get information about listening sockets
+        # This is a simplified approach - in a real implementation you might
+        # use more sophisticated system inspection tools
+        
+        # For now, we'll implement a basic approach that looks for signs of
+        # connection backlog, but this is inherently limited
+        
+        # Check if we can get process information
+        pid = os.getpid()
+        
+        # Try to read network statistics (Linux-specific)
+        try:
+            if os.path.exists('/proc/net/tcp'):
+                with open('/proc/net/tcp', 'r') as f:
+                    lines = f.readlines()
+                    # This would require parsing the TCP connection table
+                    # to find listening sockets and their queue depths
+                    # For now, we'll just log that we attempted this approach
+                    logger.debug(
+                        "Attempted system-level TCP queue inspection",
+                        tcp_lines=len(lines),
+                        approach="proc_net_tcp"
+                    )
+        except Exception:
+            pass
+        
+        # This approach is quite complex and system-dependent
+        # For the initial implementation, we'll return None to indicate
+        # that this method is not yet fully implemented
+        logger.debug("System-level queue detection not fully implemented")
+        return None
+        
+    except Exception as e:
+        logger.debug(
+            "Error in system-level queue detection",
+            error=str(e),
+            error_type=type(e).__name__
+        )
+        return None
+
+
+def _estimate_queue_from_metrics() -> Optional[int]:
+    """
+    Estimate queue depth from existing HTTP metrics correlation.
+    
+    Uses the relationship between requests in flight, active worker threads,
+    and recent request rate to estimate how many requests might be queued.
+    
+    Returns:
+        Estimated number of queued requests or None if estimation fails
+    """
+    try:
+        # Get current metrics values - if these fail, we can't estimate
+        active_workers = get_active_worker_count()
+        total_workers = get_total_worker_count()
+        
+        # Try to get current requests in flight
+        requests_in_flight = 0
+        try:
+            # Access the Prometheus gauge value
+            if hasattr(HTTP_REQUESTS_IN_FLIGHT, '_value'):
+                requests_in_flight = HTTP_REQUESTS_IN_FLIGHT._value._value
+            elif hasattr(HTTP_REQUESTS_IN_FLIGHT, 'get'):
+                requests_in_flight = HTTP_REQUESTS_IN_FLIGHT.get()
+        except Exception as e:
+            try:
+                logger.debug(
+                    "Could not get requests in flight metric",
+                    error=str(e)
+                )
+            except Exception:
+                # Ignore logger errors
+                pass
+            # Keep requests_in_flight as 0 when gauge access fails
+            # This is not a fatal error - we can still estimate with worker counts
+        
+        # Basic estimation logic:
+        # If we have more requests in flight than active workers,
+        # the difference might represent queued requests
+        estimated_queue = max(0, requests_in_flight - active_workers)
+        
+        # Apply some heuristics to make the estimate more reasonable
+        if estimated_queue > 0:
+            # Cap the estimate at a reasonable maximum based on total workers
+            max_reasonable_queue = total_workers * 2  # Allow up to 2x worker count in queue
+            estimated_queue = min(estimated_queue, max_reasonable_queue)
+            
+            try:
+                logger.debug(
+                    "Estimated queue depth from metrics correlation",
+                    requests_in_flight=requests_in_flight,
+                    active_workers=active_workers,
+                    total_workers=total_workers,
+                    estimated_queue=estimated_queue,
+                    estimation_method="requests_minus_workers"
+                )
+            except Exception:
+                # Ignore logger errors
+                pass
+            
+            return estimated_queue
+        
+        # If no queue estimated, try alternative approach
+        # Look for signs of thread saturation
+        if active_workers >= total_workers and requests_in_flight > active_workers:
+            # All workers are busy and we have more requests than workers
+            # This suggests some queuing might be happening
+            saturation_queue = min(requests_in_flight - active_workers, total_workers)
+            
+            try:
+                logger.debug(
+                    "Estimated queue from thread saturation",
+                    active_workers=active_workers,
+                    total_workers=total_workers,
+                    requests_in_flight=requests_in_flight,
+                    saturation_queue=saturation_queue,
+                    estimation_method="saturation_based"
+                )
+            except Exception:
+                # Ignore logger errors
+                pass
+            
+            return saturation_queue
+        
+        # No queue detected through metrics correlation
+        try:
+            logger.debug(
+                "No queue estimated from metrics correlation",
+                requests_in_flight=requests_in_flight,
+                active_workers=active_workers,
+                total_workers=total_workers
+            )
+        except Exception:
+            # Ignore logger errors
+            pass
+        return 0
+        
+    except Exception as e:
+        try:
+            logger.debug(
+                "Error estimating queue from metrics correlation",
+                error=str(e),
+                error_type=type(e).__name__
+            )
+        except Exception:
+            # Ignore logger errors
+            pass
+        # Return None when there are fundamental errors (like worker count failures)
+        # This indicates complete failure of this estimation method
+        return None
+
+
 def _detect_uvicorn_thread_pool() -> Dict[str, Any]:
     """
     Detect Uvicorn's thread pool configuration and current state.
