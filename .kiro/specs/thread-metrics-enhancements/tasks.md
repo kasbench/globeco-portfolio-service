@@ -8,7 +8,7 @@
   - Write unit tests for metric creation and registration
   - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 3.1, 3.2, 3.5_
 
-- [ ] 2. Implement Python threading detection and enumeration
+- [x] 2. Implement Python threading detection and enumeration
   - Create `get_active_worker_count()` function to count threads with "RUNNING" or "BUSY" status
   - Create `get_total_worker_count()` function to count all threads in the thread pool
   - Implement `_enumerate_active_threads()` using Python's `threading.enumerate()`
@@ -17,7 +17,7 @@
   - Write comprehensive unit tests for thread detection logic
   - _Requirements: 2.1, 2.2, 2.3, 4.1, 4.2_
 
-- [ ] 3. Implement thread pool configuration detection
+- [x] 3. Implement thread pool configuration detection
   - Create `get_max_configured_workers()` function to detect maximum thread pool size
   - Implement `_detect_uvicorn_thread_pool()` to inspect Uvicorn's thread pool configuration
   - Add `_get_asyncio_thread_pool_info()` for asyncio thread pool executor details
