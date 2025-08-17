@@ -62,7 +62,7 @@
   - Write integration tests for monitoring infrastructure integration
   - _Requirements: 3.1, 3.2, 3.3, 3.4, 6.1, 6.2, 6.3, 6.4_
 
-- [ ] 8. Add thread metrics to application startup
+- [x] 8. Add thread metrics to application startup
   - Modify `app/main.py` to call `setup_thread_metrics()` during application initialization
   - Add conditional setup based on `enable_thread_metrics` configuration setting
   - Ensure thread metrics are initialized after existing monitoring setup
