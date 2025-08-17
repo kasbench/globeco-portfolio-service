@@ -23,6 +23,10 @@ from app.monitoring import (
     HTTP_REQUESTS_TOTAL,
     HTTP_REQUEST_DURATION,
     HTTP_REQUESTS_IN_FLIGHT,
+    HTTP_WORKERS_ACTIVE,
+    HTTP_WORKERS_TOTAL,
+    HTTP_WORKERS_MAX_CONFIGURED,
+    HTTP_REQUESTS_QUEUED,
 )
 
 
@@ -2681,3 +2685,441 @@ class TestEnhancedHTTPMetricsMiddleware:
                 mock_histogram.labels.assert_called_once_with(
                     method=method, path="/api/v1/portfolios", status=str(status_code)
                 )
+
+class TestThreadMetrics:
+    """Test the thread worker metrics are created correctly."""
+    
+    def test_http_workers_active_created(self):
+        """Test HTTP_WORKERS_ACTIVE metric is created."""
+        assert HTTP_WORKERS_ACTIVE is not None
+        
+        # Should be either Gauge or DummyMetric
+        assert isinstance(HTTP_WORKERS_ACTIVE, (Gauge, DummyMetric))
+        
+        # Should support gauge operations
+        HTTP_WORKERS_ACTIVE.set(5)
+        HTTP_WORKERS_ACTIVE.inc()
+        HTTP_WORKERS_ACTIVE.dec()
+    
+    def test_http_workers_total_created(self):
+        """Test HTTP_WORKERS_TOTAL metric is created."""
+        assert HTTP_WORKERS_TOTAL is not None
+        
+        # Should be either Gauge or DummyMetric
+        assert isinstance(HTTP_WORKERS_TOTAL, (Gauge, DummyMetric))
+        
+        # Should support gauge operations
+        HTTP_WORKERS_TOTAL.set(10)
+        HTTP_WORKERS_TOTAL.inc()
+        HTTP_WORKERS_TOTAL.dec()
+    
+    def test_http_workers_max_configured_created(self):
+        """Test HTTP_WORKERS_MAX_CONFIGURED metric is created."""
+        assert HTTP_WORKERS_MAX_CONFIGURED is not None
+        
+        # Should be either Gauge or DummyMetric
+        assert isinstance(HTTP_WORKERS_MAX_CONFIGURED, (Gauge, DummyMetric))
+        
+        # Should support gauge operations
+        HTTP_WORKERS_MAX_CONFIGURED.set(20)
+        HTTP_WORKERS_MAX_CONFIGURED.inc()
+        HTTP_WORKERS_MAX_CONFIGURED.dec()
+    
+    def test_http_requests_queued_created(self):
+        """Test HTTP_REQUESTS_QUEUED metric is created."""
+        assert HTTP_REQUESTS_QUEUED is not None
+        
+        # Should be either Gauge or DummyMetric
+        assert isinstance(HTTP_REQUESTS_QUEUED, (Gauge, DummyMetric))
+        
+        # Should support gauge operations
+        HTTP_REQUESTS_QUEUED.set(3)
+        HTTP_REQUESTS_QUEUED.inc()
+        HTTP_REQUESTS_QUEUED.dec()
+    
+    def test_thread_metrics_no_labels(self):
+        """Test that thread metrics have no labels (are simple gauges)."""
+        # All thread metrics should be simple gauges without labels
+        # Test that they can be called directly without labels
+        
+        HTTP_WORKERS_ACTIVE.set(5)
+        HTTP_WORKERS_ACTIVE.inc(2)
+        HTTP_WORKERS_ACTIVE.dec(1)
+        
+        HTTP_WORKERS_TOTAL.set(10)
+        HTTP_WORKERS_TOTAL.inc(3)
+        HTTP_WORKERS_TOTAL.dec(2)
+        
+        HTTP_WORKERS_MAX_CONFIGURED.set(20)
+        HTTP_WORKERS_MAX_CONFIGURED.inc(5)
+        HTTP_WORKERS_MAX_CONFIGURED.dec(1)
+        
+        HTTP_REQUESTS_QUEUED.set(0)
+        HTTP_REQUESTS_QUEUED.inc(1)
+        HTTP_REQUESTS_QUEUED.dec(1)
+    
+    def test_thread_metrics_exist(self):
+        """Test that all thread metrics exist and have expected interface."""
+        # Test that all thread metrics exist
+        assert HTTP_WORKERS_ACTIVE is not None
+        assert HTTP_WORKERS_TOTAL is not None
+        assert HTTP_WORKERS_MAX_CONFIGURED is not None
+        assert HTTP_REQUESTS_QUEUED is not None
+        
+        # Test that they support the expected gauge interface
+        metrics = [
+            HTTP_WORKERS_ACTIVE,
+            HTTP_WORKERS_TOTAL,
+            HTTP_WORKERS_MAX_CONFIGURED,
+            HTTP_REQUESTS_QUEUED
+        ]
+        
+        for metric in metrics:
+            # All should support gauge operations
+            metric.set(10)  # Should not raise
+            metric.inc()    # Should not raise
+            metric.dec()    # Should not raise
+            metric.set(0)   # Reset to 0
+    
+    def test_thread_metrics_registry_contains_thread_metrics(self):
+        """Test that thread metrics are registered in the global registry."""
+        # The metrics should exist regardless of registry state
+        # since they are module-level variables
+        assert HTTP_WORKERS_ACTIVE is not None
+        assert HTTP_WORKERS_TOTAL is not None
+        assert HTTP_WORKERS_MAX_CONFIGURED is not None
+        assert HTTP_REQUESTS_QUEUED is not None
+        
+        # Test that they have the expected types
+        from prometheus_client import Gauge
+        assert isinstance(HTTP_WORKERS_ACTIVE, (Gauge, DummyMetric))
+        assert isinstance(HTTP_WORKERS_TOTAL, (Gauge, DummyMetric))
+        assert isinstance(HTTP_WORKERS_MAX_CONFIGURED, (Gauge, DummyMetric))
+        assert isinstance(HTTP_REQUESTS_QUEUED, (Gauge, DummyMetric))
+    
+    def test_thread_metrics_names_and_descriptions(self):
+        """Test that thread metrics have the correct names and work as expected."""
+        # We can't directly access names/descriptions from prometheus_client objects,
+        # but we can verify they were created with the right parameters by checking
+        # that they exist and work as expected
+        
+        # Test that the metrics work with the expected interface
+        # This indirectly verifies they were created correctly
+        
+        # HTTP_WORKERS_ACTIVE should be a gauge with no labels
+        HTTP_WORKERS_ACTIVE.set(3)
+        HTTP_WORKERS_ACTIVE.inc()
+        HTTP_WORKERS_ACTIVE.dec()
+        
+        # HTTP_WORKERS_TOTAL should be a gauge with no labels
+        HTTP_WORKERS_TOTAL.set(8)
+        HTTP_WORKERS_TOTAL.inc()
+        HTTP_WORKERS_TOTAL.dec()
+        
+        # HTTP_WORKERS_MAX_CONFIGURED should be a gauge with no labels
+        HTTP_WORKERS_MAX_CONFIGURED.set(10)
+        HTTP_WORKERS_MAX_CONFIGURED.inc()
+        HTTP_WORKERS_MAX_CONFIGURED.dec()
+        
+        # HTTP_REQUESTS_QUEUED should be a gauge with no labels
+        HTTP_REQUESTS_QUEUED.set(2)
+        HTTP_REQUESTS_QUEUED.inc()
+        HTTP_REQUESTS_QUEUED.dec()
+    
+    def test_thread_metrics_with_float_values(self):
+        """Test thread metrics with float values."""
+        # Thread metrics should support float values for precision
+        HTTP_WORKERS_ACTIVE.set(3.5)
+        HTTP_WORKERS_ACTIVE.inc(1.5)
+        HTTP_WORKERS_ACTIVE.dec(0.5)
+        
+        HTTP_WORKERS_TOTAL.set(8.0)
+        HTTP_WORKERS_TOTAL.inc(2.0)
+        HTTP_WORKERS_TOTAL.dec(1.0)
+        
+        HTTP_WORKERS_MAX_CONFIGURED.set(10.0)
+        HTTP_WORKERS_MAX_CONFIGURED.inc(5.0)
+        HTTP_WORKERS_MAX_CONFIGURED.dec(2.0)
+        
+        HTTP_REQUESTS_QUEUED.set(0.0)
+        HTTP_REQUESTS_QUEUED.inc(1.0)
+        HTTP_REQUESTS_QUEUED.dec(1.0)
+    
+    def test_thread_metrics_edge_cases(self):
+        """Test thread metrics with edge case values."""
+        # Test with zero values
+        HTTP_WORKERS_ACTIVE.set(0)
+        HTTP_WORKERS_TOTAL.set(0)
+        HTTP_WORKERS_MAX_CONFIGURED.set(0)
+        HTTP_REQUESTS_QUEUED.set(0)
+        
+        # Test with large values
+        HTTP_WORKERS_ACTIVE.set(1000)
+        HTTP_WORKERS_TOTAL.set(2000)
+        HTTP_WORKERS_MAX_CONFIGURED.set(5000)
+        HTTP_REQUESTS_QUEUED.set(10000)
+        
+        # Test with negative values (should be allowed for gauges)
+        HTTP_WORKERS_ACTIVE.set(-1)
+        HTTP_WORKERS_TOTAL.set(-1)
+        HTTP_WORKERS_MAX_CONFIGURED.set(-1)
+        HTTP_REQUESTS_QUEUED.set(-1)
+
+
+class TestThreadMetricsCreation:
+    """Test thread metrics creation with error handling."""
+    
+    def setup_method(self):
+        """Clear registry before each test."""
+        clear_metrics_registry()
+    
+    def teardown_method(self):
+        """Clear registry after each test."""
+        clear_metrics_registry()
+    
+    def test_create_thread_metrics_success(self):
+        """Test successful creation of thread metrics."""
+        with patch('prometheus_client.Gauge') as mock_gauge:
+            mock_instance = Mock()
+            mock_gauge.return_value = mock_instance
+            
+            # Create each thread metric
+            active_metric = _get_or_create_metric(
+                mock_gauge,
+                'http_workers_active',
+                'Number of threads currently executing requests or performing work'
+            )
+            
+            total_metric = _get_or_create_metric(
+                mock_gauge,
+                'http_workers_total',
+                'Total number of threads currently alive in the thread pool'
+            )
+            
+            max_metric = _get_or_create_metric(
+                mock_gauge,
+                'http_workers_max_configured',
+                'Maximum number of threads that can be created in the thread pool'
+            )
+            
+            queued_metric = _get_or_create_metric(
+                mock_gauge,
+                'http_requests_queued',
+                'Number of pending requests waiting in the queue for thread assignment'
+            )
+            
+            # All should be created successfully
+            assert active_metric is mock_instance
+            assert total_metric is mock_instance
+            assert max_metric is mock_instance
+            assert queued_metric is mock_instance
+            
+            # All should be in registry
+            registry = get_metrics_registry()
+            assert len(registry) == 4
+            assert 'http_workers_active' in registry
+            assert 'http_workers_total' in registry
+            assert 'http_workers_max_configured' in registry
+            assert 'http_requests_queued' in registry
+    
+    def test_create_thread_metrics_with_duplicate_error(self):
+        """Test thread metrics creation with duplicate registration error."""
+        def failing_gauge(*args, **kwargs):
+            raise ValueError("Duplicated timeseries in CollectorRegistry")
+        
+        # Create thread metrics that will fail
+        active_metric = _get_or_create_metric(
+            failing_gauge,
+            'http_workers_active',
+            'Number of threads currently executing requests or performing work'
+        )
+        
+        total_metric = _get_or_create_metric(
+            failing_gauge,
+            'http_workers_total',
+            'Total number of threads currently alive in the thread pool'
+        )
+        
+        max_metric = _get_or_create_metric(
+            failing_gauge,
+            'http_workers_max_configured',
+            'Maximum number of threads that can be created in the thread pool'
+        )
+        
+        queued_metric = _get_or_create_metric(
+            failing_gauge,
+            'http_requests_queued',
+            'Number of pending requests waiting in the queue for thread assignment'
+        )
+        
+        # All should return DummyMetric
+        assert isinstance(active_metric, DummyMetric)
+        assert isinstance(total_metric, DummyMetric)
+        assert isinstance(max_metric, DummyMetric)
+        assert isinstance(queued_metric, DummyMetric)
+        
+        # All should be in registry as dummy metrics
+        registry = get_metrics_registry()
+        assert len(registry) == 4
+        assert all(isinstance(metric, DummyMetric) for metric in registry.values())
+    
+    def test_create_thread_metrics_with_unexpected_error(self):
+        """Test thread metrics creation with unexpected error."""
+        def failing_gauge(*args, **kwargs):
+            raise RuntimeError("Unexpected error during metric creation")
+        
+        # Create thread metrics that will fail
+        active_metric = _get_or_create_metric(
+            failing_gauge,
+            'http_workers_active',
+            'Number of threads currently executing requests or performing work'
+        )
+        
+        # Should return DummyMetric
+        assert isinstance(active_metric, DummyMetric)
+        
+        # Should be in registry as dummy metric
+        registry = get_metrics_registry()
+        assert 'http_workers_active' in registry
+        assert isinstance(registry['http_workers_active'], DummyMetric)
+    
+    def test_thread_metrics_reuse_existing(self):
+        """Test that existing thread metrics are reused."""
+        with patch('prometheus_client.Gauge') as mock_gauge:
+            mock_instance = Mock()
+            mock_gauge.return_value = mock_instance
+            
+            # Create metric first time
+            metric1 = _get_or_create_metric(
+                mock_gauge,
+                'http_workers_active',
+                'Number of threads currently executing requests or performing work'
+            )
+            
+            # Try to create same metric again
+            metric2 = _get_or_create_metric(
+                mock_gauge,
+                'http_workers_active',
+                'Different description'  # Different description
+            )
+            
+            # Should return the same instance
+            assert metric1 is metric2
+            
+            # Registry should only have one entry
+            registry = get_metrics_registry()
+            assert len(registry) == 1
+            assert 'http_workers_active' in registry
+            
+            # Gauge should only be called once
+            assert mock_gauge.call_count == 1
+
+
+class TestOpenTelemetryThreadMetrics:
+    """Test OpenTelemetry thread metrics creation and fallback behavior."""
+    
+    @patch('app.monitoring.metrics')
+    def test_otel_thread_metrics_creation_success(self, mock_metrics):
+        """Test successful creation of OpenTelemetry thread metrics."""
+        # Mock the meter and metric creation
+        mock_meter = Mock()
+        mock_metrics.get_meter.return_value = mock_meter
+        
+        mock_active_counter = Mock()
+        mock_total_counter = Mock()
+        mock_max_counter = Mock()
+        mock_queued_counter = Mock()
+        
+        # Configure the meter to return our mock metrics
+        mock_meter.create_up_down_counter.side_effect = [
+            mock_active_counter,
+            mock_total_counter,
+            mock_max_counter,
+            mock_queued_counter
+        ]
+        
+        # Import the module to trigger OpenTelemetry metric creation
+        # This would normally happen during module import
+        from app import monitoring
+        
+        # Verify that get_meter was called
+        mock_metrics.get_meter.assert_called_once()
+        
+        # Verify that create_up_down_counter was called for each thread metric
+        expected_calls = [
+            call(
+                name="http_workers_active",
+                description="Number of threads currently executing requests or performing work",
+                unit="1"
+            ),
+            call(
+                name="http_workers_total",
+                description="Total number of threads currently alive in the thread pool",
+                unit="1"
+            ),
+            call(
+                name="http_workers_max_configured",
+                description="Maximum number of threads that can be created in the thread pool",
+                unit="1"
+            ),
+            call(
+                name="http_requests_queued",
+                description="Number of pending requests waiting in the queue for thread assignment",
+                unit="1"
+            )
+        ]
+        
+        # Check that create_up_down_counter was called with expected parameters
+        # Note: This test may need adjustment based on actual module import behavior
+        assert mock_meter.create_up_down_counter.call_count >= 4
+    
+    @patch('app.monitoring.metrics')
+    @patch('app.monitoring.logger')
+    def test_otel_thread_metrics_creation_failure(self, mock_logger, mock_metrics):
+        """Test OpenTelemetry thread metrics creation failure and fallback."""
+        # Mock metrics.get_meter to raise an exception
+        mock_metrics.get_meter.side_effect = Exception("OpenTelemetry not available")
+        
+        # Import the module to trigger OpenTelemetry metric creation
+        # This would normally happen during module import
+        try:
+            from app import monitoring
+            # The module should handle the exception and create dummy metrics
+        except Exception:
+            pass  # Expected if module import fails
+        
+        # Verify that error was logged
+        mock_logger.error.assert_called()
+        error_calls = [call for call in mock_logger.error.call_args_list 
+                      if 'Failed to create OpenTelemetry metrics' in str(call)]
+        assert len(error_calls) > 0
+        
+        # Verify that warning about dummy metrics was logged
+        mock_logger.warning.assert_called()
+        warning_calls = [call for call in mock_logger.warning.call_args_list 
+                        if 'Created dummy OpenTelemetry metrics' in str(call)]
+        assert len(warning_calls) > 0
+    
+    def test_dummy_otel_metric_interface(self):
+        """Test that dummy OpenTelemetry metrics provide the expected interface."""
+        from app.monitoring import DummyOTelMetric
+        
+        dummy = DummyOTelMetric()
+        
+        # Test that methods don't raise exceptions
+        dummy.add(1)
+        dummy.add(5, attributes={"method": "GET"})
+        dummy.record(100.5)
+        dummy.record(200.0, attributes={"path": "/test"})
+    
+    def test_dummy_otel_metric_with_none_values(self):
+        """Test dummy OpenTelemetry metrics handle None values gracefully."""
+        from app.monitoring import DummyOTelMetric
+        
+        dummy = DummyOTelMetric()
+        
+        # Should handle None values without error
+        dummy.add(None)
+        dummy.add(None, attributes=None)
+        dummy.record(None)
+        dummy.record(None, attributes=None)

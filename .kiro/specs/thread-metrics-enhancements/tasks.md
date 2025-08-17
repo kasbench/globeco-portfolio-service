@@ -1,6 +1,6 @@
 # Thread Metrics Enhancement Implementation Plan
 
-- [ ] 1. Create core thread metrics with dual system support
+- [x] 1. Create core thread metrics with dual system support
   - Add four thread metrics using existing `_get_or_create_metric()` pattern in `app/monitoring.py`
   - Create Prometheus gauges: `http_workers_active`, `http_workers_total`, `http_workers_max_configured`, `http_requests_queued`
   - Create corresponding OpenTelemetry UpDownCounter metrics for collector export

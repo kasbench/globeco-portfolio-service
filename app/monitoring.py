@@ -210,6 +210,31 @@ HTTP_REQUESTS_IN_FLIGHT = _get_or_create_metric(
     'Number of HTTP requests currently being processed'
 )
 
+# Create the four thread worker metrics (Prometheus - for /metrics endpoint)
+HTTP_WORKERS_ACTIVE = _get_or_create_metric(
+    Gauge,
+    'http_workers_active',
+    'Number of threads currently executing requests or performing work'
+)
+
+HTTP_WORKERS_TOTAL = _get_or_create_metric(
+    Gauge,
+    'http_workers_total',
+    'Total number of threads currently alive in the thread pool'
+)
+
+HTTP_WORKERS_MAX_CONFIGURED = _get_or_create_metric(
+    Gauge,
+    'http_workers_max_configured',
+    'Maximum number of threads that can be created in the thread pool'
+)
+
+HTTP_REQUESTS_QUEUED = _get_or_create_metric(
+    Gauge,
+    'http_requests_queued',
+    'Number of pending requests waiting in the queue for thread assignment'
+)
+
 # Create OpenTelemetry metrics (for collector export)
 # These will be sent to the OpenTelemetry Collector and then to Prometheus
 try:
@@ -234,7 +259,32 @@ try:
         unit="1"
     )
     
-    logger.info("Successfully created OpenTelemetry HTTP metrics")
+    # OpenTelemetry thread worker metrics
+    otel_http_workers_active = meter.create_up_down_counter(
+        name="http_workers_active",
+        description="Number of threads currently executing requests or performing work",
+        unit="1"
+    )
+    
+    otel_http_workers_total = meter.create_up_down_counter(
+        name="http_workers_total",
+        description="Total number of threads currently alive in the thread pool",
+        unit="1"
+    )
+    
+    otel_http_workers_max_configured = meter.create_up_down_counter(
+        name="http_workers_max_configured",
+        description="Maximum number of threads that can be created in the thread pool",
+        unit="1"
+    )
+    
+    otel_http_requests_queued = meter.create_up_down_counter(
+        name="http_requests_queued",
+        description="Number of pending requests waiting in the queue for thread assignment",
+        unit="1"
+    )
+    
+    logger.info("Successfully created OpenTelemetry HTTP and thread metrics")
     
 except Exception as e:
     logger.error(
@@ -253,6 +303,10 @@ except Exception as e:
     otel_http_requests_total = DummyOTelMetric()
     otel_http_request_duration = DummyOTelMetric()
     otel_http_requests_in_flight = DummyOTelMetric()
+    otel_http_workers_active = DummyOTelMetric()
+    otel_http_workers_total = DummyOTelMetric()
+    otel_http_workers_max_configured = DummyOTelMetric()
+    otel_http_requests_queued = DummyOTelMetric()
     logger.warning("Created dummy OpenTelemetry metrics due to initialization failure")
 
 
