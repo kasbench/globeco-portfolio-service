@@ -134,6 +134,18 @@ if settings.enable_metrics:
 else:
     logger.info("Enhanced HTTP metrics middleware disabled")
 
+# Setup thread metrics if enabled
+if settings.enable_thread_metrics:
+    from app.monitoring import setup_thread_metrics
+    setup_thread_metrics(
+        enable_thread_metrics=settings.enable_thread_metrics,
+        thread_metrics_update_interval=settings.thread_metrics_update_interval,
+        thread_metrics_debug_logging=settings.thread_metrics_debug_logging
+    )
+    logger.info("Thread metrics collection enabled")
+else:
+    logger.info("Thread metrics collection disabled")
+
 # Instrument FastAPI app
 FastAPIInstrumentor().instrument_app(app)
 
