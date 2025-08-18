@@ -8,7 +8,7 @@ accurate identification and counting of worker threads vs system threads.
 import pytest
 import threading
 import time
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch, MagicMock, PropertyMock
 from concurrent.futures import ThreadPoolExecutor
 
 from app.monitoring import (
@@ -753,7 +753,665 @@ class TestThreadPoolConfigurationIntegration:
         # Should return a reasonable positive integer
         assert isinstance(result, int)
         assert result > 0
-        assert result <= 32  # Should be capped at 32
+        assert result <= 32  # Should be capped at reasonable maximum
+
+
+class TestEnumerateActiveThreadsComprehensive:
+    """Comprehensive test cases for _enumerate_active_threads function covering various thread scenarios."""
+    
+    def test_enumerate_active_threads_with_multiple_thread_types(self):
+        """Test enumeration with various types of threads running simultaneously."""
+        def worker_task():
+            time.sleep(0.2)
+        
+        def daemon_task():
+            time.sleep(0.2)
+        
+        # Create different types of threads
+        worker_thread = threading.Thread(target=worker_task, name="worker-thread-test")
+        daemon_thread = threading.Thread(target=daemon_task, name="daemon-thread-test", daemon=True)
+        
+        try:
+            worker_thread.start()
+            daemon_thread.start()
+            time.sleep(0.05)  # Let threads start
+            
+            threads = _enumerate_active_threads()
+            
+            # Should find our test threads
+            thread_names = [t.name for t in threads]
+            assert "worker-thread-test" in thread_names
+            assert "daemon-thread-test" in thread_names
+            
+            # Should include main thread
+            assert any("MainThread" in name or name == "MainThread" for name in thread_names)
+            
+        finally:
+            worker_thread.join(timeout=1.0)
+            daemon_thread.join(timeout=1.0)
+    
+    def test_enumerate_active_threads_during_thread_creation_destruction(self):
+        """Test enumeration during dynamic thread creation and destruction."""
+        def short_task():
+            time.sleep(0.05)
+        
+        # Create threads that will start and finish quickly
+        threads_to_create = []
+        for i in range(3):
+            t = threading.Thread(target=short_task, name=f"short-lived-{i}")
+            threads_to_create.append(t)
+        
+        # Start threads
+        for t in threads_to_create:
+            t.start()
+        
+        # Enumerate while threads are running
+        active_threads = _enumerate_active_threads()
+        assert len(active_threads) > 0
+        
+        # Wait for threads to complete
+        for t in threads_to_create:
+            t.join(timeout=1.0)
+        
+        # Enumerate after threads complete
+        final_threads = _enumerate_active_threads()
+        assert len(final_threads) >= 1  # At least main thread
+    
+    @patch('threading.enumerate')
+    def test_enumerate_active_threads_with_various_exceptions(self, mock_enumerate):
+        """Test error handling with different types of exceptions."""
+        exception_types = [
+            RuntimeError("Runtime error"),
+            OSError("OS error"),
+            MemoryError("Memory error"),
+            SystemError("System error"),
+            Exception("Generic exception")
+        ]
+        
+        for exception in exception_types:
+            mock_enumerate.side_effect = exception
+            
+            threads = _enumerate_active_threads()
+            
+            assert threads == []
+            assert isinstance(threads, list)
+    
+    @patch('threading.enumerate')
+    def test_enumerate_active_threads_with_corrupted_thread_list(self, mock_enumerate):
+        """Test handling of corrupted or invalid thread list."""
+        # Test with non-list return value that causes TypeError when converted to list
+        mock_enumerate.side_effect = TypeError("Invalid thread list")
+        
+        threads = _enumerate_active_threads()
+        assert threads == []
+        
+        # Test with other problematic return values
+        mock_enumerate.side_effect = ValueError("Thread enumeration value error")
+        threads = _enumerate_active_threads()
+        assert threads == []
+
+
+class TestIsWorkerThreadComprehensive:
+    """Comprehensive test cases for _is_worker_thread covering various thread scenarios."""
+    
+    def test_is_worker_thread_with_all_worker_patterns(self):
+        """Test identification with all supported worker thread patterns."""
+        worker_patterns = [
+            "ThreadPoolExecutor-0_0",
+            "worker-1",
+            "uvicorn-server-worker",
+            "asyncio-thread-pool-1",
+            "executor-thread-2",
+            "http-processor-thread",
+            "THREADPOOLEXECUTOR-UPPER",  # Case insensitive
+            "Worker-Mixed-Case",
+            "custom-executor-thread"
+        ]
+        
+        for pattern in worker_patterns:
+            mock_thread = Mock(spec=threading.Thread)
+            mock_thread.name = pattern
+            
+            result = _is_worker_thread(mock_thread)
+            assert result is True, f"Pattern '{pattern}' should be identified as worker thread"
+    
+    def test_is_worker_thread_with_non_worker_patterns(self):
+        """Test that non-worker threads are correctly identified."""
+        non_worker_patterns = [
+            "MainThread",
+            "system-monitor",
+            "garbage-collector",
+            "signal-handler",
+            "timer-thread",
+            "logging-thread",
+            "random-thread-name",
+            "test-thread",
+            ""  # Empty name
+        ]
+        
+        for pattern in non_worker_patterns:
+            mock_thread = Mock(spec=threading.Thread)
+            mock_thread.name = pattern
+            mock_thread.daemon = False
+            mock_thread._target = None
+            
+            result = _is_worker_thread(mock_thread)
+            assert result is False, f"Pattern '{pattern}' should NOT be identified as worker thread"
+    
+    def test_is_worker_thread_with_daemon_and_target_combinations(self):
+        """Test identification based on daemon status and target function combinations."""
+        test_cases = [
+            # (daemon, has_target, expected_result, description)
+            (True, True, True, "daemon with target should be worker"),
+            (True, False, False, "daemon without target should not be worker"),
+            (False, True, False, "non-daemon with target should not be worker"),
+            (False, False, False, "non-daemon without target should not be worker"),
+        ]
+        
+        for daemon, has_target, expected, description in test_cases:
+            mock_thread = Mock(spec=threading.Thread)
+            mock_thread.name = "custom-thread"
+            mock_thread.daemon = daemon
+            mock_thread._target = Mock() if has_target else None
+            
+            result = _is_worker_thread(mock_thread)
+            assert result == expected, f"{description}: daemon={daemon}, has_target={has_target}"
+    
+    def test_is_worker_thread_with_missing_attributes(self):
+        """Test handling of threads with various missing attributes."""
+        # Test thread without name attribute
+        mock_thread = Mock(spec=threading.Thread)
+        if hasattr(mock_thread, 'name'):
+            delattr(mock_thread, 'name')
+        
+        result = _is_worker_thread(mock_thread)
+        assert result is False
+        
+        # Test thread without daemon attribute
+        mock_thread = Mock(spec=threading.Thread)
+        mock_thread.name = "test-thread"
+        if hasattr(mock_thread, 'daemon'):
+            delattr(mock_thread, 'daemon')
+        
+        result = _is_worker_thread(mock_thread)
+        assert result is False
+        
+        # Test thread without _target attribute
+        mock_thread = Mock(spec=threading.Thread)
+        mock_thread.name = "test-thread"
+        mock_thread.daemon = True
+        if hasattr(mock_thread, '_target'):
+            delattr(mock_thread, '_target')
+        
+        result = _is_worker_thread(mock_thread)
+        assert result is False
+    
+    def test_is_worker_thread_with_attribute_access_errors(self):
+        """Test handling of attribute access errors."""
+        mock_thread = Mock(spec=threading.Thread)
+        
+        # Mock name property to raise exception
+        type(mock_thread).name = PropertyMock(side_effect=AttributeError("Name access failed"))
+        
+        result = _is_worker_thread(mock_thread)
+        assert result is False
+        
+        # Test with name access working but daemon access failing
+        mock_thread = Mock(spec=threading.Thread)
+        mock_thread.name = "worker-thread"
+        # The function should identify by name pattern first, before checking daemon
+        # Since "worker" is in the name, it should return True before checking daemon
+        
+        result = _is_worker_thread(mock_thread)
+        assert result is True  # Should identify by name pattern
+        
+        # Test with non-worker name and daemon access error
+        mock_thread = Mock(spec=threading.Thread)
+        mock_thread.name = "system-thread"  # Not a worker pattern
+        type(mock_thread).daemon = PropertyMock(side_effect=RuntimeError("Daemon access failed"))
+        
+        result = _is_worker_thread(mock_thread)
+        assert result is False  # Should return False due to exception in daemon check
+    
+    def test_is_worker_thread_edge_cases(self):
+        """Test edge cases and boundary conditions."""
+        # Test with very long thread name
+        mock_thread = Mock(spec=threading.Thread)
+        mock_thread.name = "a" * 1000 + "worker" + "b" * 1000
+        
+        result = _is_worker_thread(mock_thread)
+        assert result is True
+        
+        # Test with thread name containing special characters
+        mock_thread = Mock(spec=threading.Thread)
+        mock_thread.name = "worker-thread!@#$%^&*()"
+        
+        result = _is_worker_thread(mock_thread)
+        assert result is True
+        
+        # Test with unicode thread name
+        mock_thread = Mock(spec=threading.Thread)
+        mock_thread.name = "worker-线程-ワーカー"
+        
+        result = _is_worker_thread(mock_thread)
+        assert result is True
+
+
+class TestIsThreadActiveComprehensive:
+    """Comprehensive test cases for _is_thread_active covering different thread states."""
+    
+    def test_is_thread_active_with_various_thread_states(self):
+        """Test activity detection with various thread states."""
+        # Test with alive thread having target
+        mock_thread = Mock(spec=threading.Thread)
+        mock_thread.is_alive.return_value = True
+        mock_thread.name = "worker-thread"
+        mock_thread._target = Mock()
+        mock_thread._target.__name__ = "worker_function"
+        
+        result = _is_thread_active(mock_thread)
+        assert result is True
+        
+        # Test with alive thread without target
+        mock_thread = Mock(spec=threading.Thread)
+        mock_thread.is_alive.return_value = True
+        mock_thread.name = "worker-thread"
+        mock_thread._target = None
+        
+        result = _is_thread_active(mock_thread)
+        assert result is True  # Conservative approach
+        
+        # Test with dead thread
+        mock_thread = Mock(spec=threading.Thread)
+        mock_thread.is_alive.return_value = False
+        mock_thread.name = "worker-thread"
+        mock_thread._target = Mock()
+        
+        result = _is_thread_active(mock_thread)
+        assert result is False
+    
+    def test_is_thread_active_with_target_function_variations(self):
+        """Test activity detection with different target function scenarios."""
+        target_scenarios = [
+            (Mock(), True, "Mock target function"),
+            (lambda: None, True, "Lambda target function"),
+            (print, True, "Built-in function target"),
+            (None, True, "No target function (conservative)"),
+        ]
+        
+        for target, expected, description in target_scenarios:
+            mock_thread = Mock(spec=threading.Thread)
+            mock_thread.is_alive.return_value = True
+            mock_thread.name = "worker-thread"
+            mock_thread._target = target
+            
+            result = _is_thread_active(mock_thread)
+            assert result == expected, f"{description}: expected {expected}, got {result}"
+    
+    def test_is_thread_active_with_is_alive_errors(self):
+        """Test handling of errors when checking thread alive status."""
+        error_types = [
+            RuntimeError("Thread state error"),
+            OSError("OS error checking thread"),
+            SystemError("System error"),
+            Exception("Generic exception")
+        ]
+        
+        for error in error_types:
+            mock_thread = Mock(spec=threading.Thread)
+            mock_thread.is_alive.side_effect = error
+            mock_thread.name = "worker-thread"
+            
+            result = _is_thread_active(mock_thread)
+            assert result is False, f"Should return False on {type(error).__name__}"
+    
+    def test_is_thread_active_with_target_access_errors(self):
+        """Test handling of errors when accessing target attribute."""
+        mock_thread = Mock(spec=threading.Thread)
+        mock_thread.is_alive.return_value = True
+        mock_thread.name = "worker-thread"
+        
+        # Mock _target property to raise exception
+        type(mock_thread)._target = PropertyMock(side_effect=AttributeError("Target access failed"))
+        
+        result = _is_thread_active(mock_thread)
+        assert result is True  # Should fall back to conservative approach
+    
+    def test_is_thread_active_with_real_thread_states(self):
+        """Test activity detection with real thread in different states."""
+        def worker_task():
+            time.sleep(0.1)
+        
+        # Test with running thread
+        thread = threading.Thread(target=worker_task, name="test-worker")
+        thread.start()
+        
+        try:
+            time.sleep(0.02)  # Let thread start
+            
+            # Thread should be alive and active
+            is_active = _is_thread_active(thread)
+            assert is_active is True
+            
+        finally:
+            thread.join(timeout=1.0)
+        
+        # After joining, thread should not be active
+        is_active = _is_thread_active(thread)
+        assert is_active is False
+
+
+class TestThreadCountingFunctionsComprehensive:
+    """Comprehensive test cases for thread counting functions with controlled scenarios."""
+    
+    def test_get_active_worker_count_with_mixed_thread_pool(self):
+        """Test active worker counting with mixed thread pool scenarios."""
+        # Create mock threads representing different scenarios
+        mock_threads = []
+        
+        # Main thread (not worker, not active)
+        main_thread = Mock(spec=threading.Thread)
+        main_thread.name = "MainThread"
+        mock_threads.append(main_thread)
+        
+        # Active worker threads
+        for i in range(3):
+            worker = Mock(spec=threading.Thread)
+            worker.name = f"ThreadPoolExecutor-0_{i}"
+            mock_threads.append(worker)
+        
+        # Idle worker threads
+        for i in range(2):
+            worker = Mock(spec=threading.Thread)
+            worker.name = f"worker-idle-{i}"
+            mock_threads.append(worker)
+        
+        # System threads (not workers)
+        system_thread = Mock(spec=threading.Thread)
+        system_thread.name = "system-monitor"
+        mock_threads.append(system_thread)
+        
+        with patch('app.monitoring._enumerate_active_threads', return_value=mock_threads):
+            with patch('app.monitoring._is_worker_thread') as mock_is_worker:
+                with patch('app.monitoring._is_thread_active') as mock_is_active:
+                    
+                    # Configure worker identification
+                    def is_worker_side_effect(thread):
+                        return any(pattern in thread.name.lower() 
+                                 for pattern in ['threadpoolexecutor', 'worker'])
+                    
+                    # Configure activity detection (only first 3 ThreadPoolExecutor threads active)
+                    def is_active_side_effect(thread):
+                        return 'ThreadPoolExecutor' in thread.name
+                    
+                    mock_is_worker.side_effect = is_worker_side_effect
+                    mock_is_active.side_effect = is_active_side_effect
+                    
+                    active_count = get_active_worker_count()
+                    
+                    # Should find 3 active workers (ThreadPoolExecutor threads)
+                    assert active_count == 3
+    
+    def test_get_total_worker_count_with_various_worker_types(self):
+        """Test total worker counting with various worker thread types."""
+        mock_threads = []
+        
+        # Different types of worker threads
+        worker_types = [
+            "ThreadPoolExecutor-0_0",
+            "ThreadPoolExecutor-0_1", 
+            "worker-thread-1",
+            "worker-thread-2",
+            "uvicorn-worker-1",
+            "asyncio-thread-pool-1",
+            "executor-thread-1",
+            "http-processor-1"
+        ]
+        
+        for name in worker_types:
+            worker = Mock(spec=threading.Thread)
+            worker.name = name
+            mock_threads.append(worker)
+        
+        # Non-worker threads
+        non_worker_types = [
+            "MainThread",
+            "system-monitor",
+            "garbage-collector"
+        ]
+        
+        for name in non_worker_types:
+            thread = Mock(spec=threading.Thread)
+            thread.name = name
+            mock_threads.append(thread)
+        
+        with patch('app.monitoring._enumerate_active_threads', return_value=mock_threads):
+            with patch('app.monitoring._is_worker_thread') as mock_is_worker:
+                
+                def is_worker_side_effect(thread):
+                    worker_patterns = ['threadpoolexecutor', 'worker', 'uvicorn', 'asyncio', 'executor', 'http']
+                    return any(pattern in thread.name.lower() for pattern in worker_patterns)
+                
+                mock_is_worker.side_effect = is_worker_side_effect
+                
+                total_count = get_total_worker_count()
+                
+                # Should find all 8 worker threads
+                assert total_count == 8
+    
+    def test_thread_counting_with_individual_thread_errors(self):
+        """Test thread counting when individual thread processing fails."""
+        mock_threads = []
+        
+        # Create some normal threads
+        for i in range(3):
+            thread = Mock(spec=threading.Thread)
+            thread.name = f"worker-{i}"
+            mock_threads.append(thread)
+        
+        # Create a problematic thread that causes errors
+        problematic_thread = Mock(spec=threading.Thread)
+        problematic_thread.name = "problematic-worker"
+        mock_threads.append(problematic_thread)
+        
+        with patch('app.monitoring._enumerate_active_threads', return_value=mock_threads):
+            with patch('app.monitoring._is_worker_thread') as mock_is_worker:
+                with patch('app.monitoring._is_thread_active') as mock_is_active:
+                    
+                    # Configure normal threads as workers
+                    def is_worker_side_effect(thread):
+                        if thread.name == "problematic-worker":
+                            raise RuntimeError("Thread processing error")
+                        return "worker" in thread.name
+                    
+                    def is_active_side_effect(thread):
+                        if thread.name == "problematic-worker":
+                            raise RuntimeError("Activity check error")
+                        return True
+                    
+                    mock_is_worker.side_effect = is_worker_side_effect
+                    mock_is_active.side_effect = is_active_side_effect
+                    
+                    # Should handle errors gracefully and count the good threads
+                    active_count = get_active_worker_count()
+                    total_count = get_total_worker_count()
+                    
+                    # Should count the 3 good worker threads, skip the problematic one
+                    assert active_count == 3
+                    assert total_count == 3
+    
+    def test_thread_counting_performance_with_many_threads(self):
+        """Test thread counting performance with large number of threads."""
+        # Create a large number of mock threads
+        mock_threads = []
+        for i in range(100):
+            thread = Mock(spec=threading.Thread)
+            thread.name = f"worker-{i}" if i % 2 == 0 else f"system-{i}"
+            mock_threads.append(thread)
+        
+        with patch('app.monitoring._enumerate_active_threads', return_value=mock_threads):
+            with patch('app.monitoring._is_worker_thread') as mock_is_worker:
+                with patch('app.monitoring._is_thread_active') as mock_is_active:
+                    
+                    # Configure every other thread as worker
+                    mock_is_worker.side_effect = lambda t: "worker" in t.name
+                    mock_is_active.return_value = True
+                    
+                    start_time = time.time()
+                    
+                    active_count = get_active_worker_count()
+                    total_count = get_total_worker_count()
+                    
+                    end_time = time.time()
+                    
+                    # Should complete quickly (under 1 second for 100 threads)
+                    assert (end_time - start_time) < 1.0
+                    
+                    # Should count correctly (50 worker threads)
+                    assert active_count == 50
+                    assert total_count == 50
+
+
+class TestThreadEnumerationErrorHandling:
+    """Test error handling when thread enumeration fails in various ways."""
+    
+    @patch('threading.enumerate')
+    def test_enumerate_active_threads_with_intermittent_failures(self, mock_enumerate):
+        """Test handling of intermittent enumeration failures."""
+        # Simulate intermittent failures
+        call_count = 0
+        def side_effect():
+            nonlocal call_count
+            call_count += 1
+            if call_count % 2 == 0:
+                raise RuntimeError("Intermittent failure")
+            return [Mock(name="test-thread")]
+        
+        mock_enumerate.side_effect = side_effect
+        
+        # First call should succeed
+        threads = _enumerate_active_threads()
+        assert len(threads) == 1
+        
+        # Second call should fail gracefully
+        threads = _enumerate_active_threads()
+        assert threads == []
+    
+    @patch('threading.enumerate')
+    def test_thread_counting_with_enumeration_timeout(self, mock_enumerate):
+        """Test thread counting when enumeration takes too long."""
+        def slow_enumerate():
+            time.sleep(2)  # Simulate slow enumeration
+            return [Mock(name="slow-thread")]
+        
+        mock_enumerate.side_effect = slow_enumerate
+        
+        # Should handle slow enumeration (though our implementation doesn't have timeout)
+        start_time = time.time()
+        threads = _enumerate_active_threads()
+        end_time = time.time()
+        
+        # This test mainly ensures the function doesn't hang indefinitely
+        assert (end_time - start_time) >= 2.0  # Should take at least 2 seconds
+        assert len(threads) == 1
+    
+    @patch('app.monitoring._enumerate_active_threads')
+    def test_thread_counting_with_corrupted_thread_data(self, mock_enumerate):
+        """Test thread counting with corrupted thread data."""
+        # Create threads with various data corruption scenarios
+        corrupted_threads = []
+        
+        # Thread with None name
+        thread1 = Mock(spec=threading.Thread)
+        thread1.name = None
+        corrupted_threads.append(thread1)
+        
+        # Thread with non-string name
+        thread2 = Mock(spec=threading.Thread)
+        thread2.name = 12345
+        corrupted_threads.append(thread2)
+        
+        # Thread with missing is_alive method
+        thread3 = Mock(spec=threading.Thread)
+        thread3.name = "test-thread"
+        if hasattr(thread3, 'is_alive'):
+            delattr(thread3, 'is_alive')
+        corrupted_threads.append(thread3)
+        
+        mock_enumerate.return_value = corrupted_threads
+        
+        # Should handle corrupted data gracefully
+        active_count = get_active_worker_count()
+        total_count = get_total_worker_count()
+        
+        # Should return 0 due to data corruption handling
+        assert active_count == 0
+        assert total_count == 0
+    
+    def test_thread_detection_with_mock_threading_module(self):
+        """Test thread detection with completely mocked threading module."""
+        with patch('threading.enumerate') as mock_enumerate:
+            with patch('threading.current_thread') as mock_current:
+                
+                # Create a realistic mock scenario
+                current_thread = Mock(spec=threading.Thread)
+                current_thread.name = "MainThread"
+                mock_current.return_value = current_thread
+                
+                worker_threads = []
+                for i in range(5):
+                    thread = Mock(spec=threading.Thread)
+                    thread.name = f"ThreadPoolExecutor-0_{i}"
+                    thread.is_alive.return_value = True
+                    thread.daemon = True
+                    thread._target = Mock()
+                    worker_threads.append(thread)
+                
+                all_threads = [current_thread] + worker_threads
+                mock_enumerate.return_value = all_threads
+                
+                # Test enumeration
+                threads = _enumerate_active_threads()
+                assert len(threads) == 6  # 1 main + 5 workers
+                
+                # Test worker identification
+                worker_count = sum(1 for t in threads if _is_worker_thread(t))
+                assert worker_count == 5  # Only the ThreadPoolExecutor threads
+                
+                # Test activity detection
+                active_count = sum(1 for t in threads if _is_worker_thread(t) and _is_thread_active(t))
+                assert active_count == 5  # All workers are active
+    
+    def test_edge_cases_with_thread_lifecycle(self):
+        """Test edge cases during thread lifecycle transitions."""
+        def quick_task():
+            pass  # Very quick task
+        
+        # Test with threads that start and finish very quickly
+        quick_threads = []
+        for i in range(10):
+            thread = threading.Thread(target=quick_task, name=f"quick-worker-{i}")
+            quick_threads.append(thread)
+        
+        # Start all threads
+        for thread in quick_threads:
+            thread.start()
+        
+        # Enumerate immediately (some threads might still be starting)
+        threads_during_start = _enumerate_active_threads()
+        
+        # Wait for all to complete
+        for thread in quick_threads:
+            thread.join(timeout=1.0)
+        
+        # Enumerate after completion
+        threads_after_completion = _enumerate_active_threads()
+        
+        # Both enumerations should succeed without errors
+        assert isinstance(threads_during_start, list)
+        assert isinstance(threads_after_completion, list)
+        assert len(threads_during_start) >= 1  # At least main thread
+        assert len(threads_after_completion) >= 1  # At least main thread
     
     def test_detect_uvicorn_thread_pool_integration(self):
         """Test _detect_uvicorn_thread_pool with real system."""

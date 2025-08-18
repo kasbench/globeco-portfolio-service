@@ -15,23 +15,34 @@ from prometheus_client import make_asgi_app
 import logging
 from app.config import settings
 from app.logging_config import setup_logging, LoggingMiddleware, get_logger
+import os
 
 # Setup structured JSON logging
 logger = setup_logging(log_level=settings.log_level)
 
-# OpenTelemetry resource
+# OpenTelemetry resource with k8s-friendly attributes
 resource = Resource.create({
-    "service.name": "globeco-portfolio-service"
+    "service.name": "globeco-portfolio-service",
+    "service.version": "1.0.0",
+    "k8s.pod.name": os.getenv("MY_POD_NAME", os.getenv("HOSTNAME", "unknown")),
+    "k8s.pod.ip": os.getenv("MY_POD_IP", "unknown"),
+    "k8s.namespace.name": "globeco",
+    "k8s.deployment.name": "globeco-portfolio-service",
+    "k8s.node.name": os.getenv("MY_NODE_NAME", "unknown")
 })
+
+# Get OpenTelemetry endpoints from environment variables with fallbacks
+otel_grpc_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "otel-collector-collector.monitoring.svc.cluster.local:4317")
+otel_http_endpoint = os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "http://otel-collector-collector.monitoring.svc.cluster.local:4318/v1/traces")
 
 # Tracing setup (gRPC and HTTP exporters)
 trace.set_tracer_provider(TracerProvider(resource=resource))
 tracer_provider = trace.get_tracer_provider()
 tracer_provider.add_span_processor(BatchSpanProcessor(
-    OTLPSpanExporterGRPC(endpoint="otel-collector-collector.monitoring.svc.cluster.local:4317", insecure=True)
+    OTLPSpanExporterGRPC(endpoint=otel_grpc_endpoint, insecure=True)
 ))
 tracer_provider.add_span_processor(BatchSpanProcessor(
-    OTLPSpanExporterHTTP(endpoint="http://otel-collector-collector.monitoring.svc.cluster.local:4318/v1/traces")
+    OTLPSpanExporterHTTP(endpoint=otel_http_endpoint)
 ))
 
 # Custom Metric Reader with Logging
@@ -77,16 +88,16 @@ class LoggingOTLPMetricExporterHTTP(OTLPMetricExporterHTTPBase):
             logging.info(f"[OTel] [HTTP] Export result: {result}")
         return result
 
-# Metrics setup (gRPC and HTTP exporters)
+# Get metrics endpoint from environment variables with fallback
+otel_metrics_endpoint = os.getenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "http://otel-collector-collector.monitoring.svc.cluster.local:4318/v1/metrics")
+
+# Metrics setup (prefer single exporter to avoid duplicates)
 from opentelemetry.metrics import set_meter_provider
 meter_provider = MeterProvider(
     resource=resource,
     metric_readers=[
         LoggingPeriodicExportingMetricReader(
-            LoggingOTLPMetricExporterGRPC(endpoint="otel-collector-collector.monitoring.svc.cluster.local:4317", insecure=True)
-        ),
-        LoggingPeriodicExportingMetricReader(
-            LoggingOTLPMetricExporterHTTP(endpoint="http://otel-collector-collector.monitoring.svc.cluster.local:4318/v1/metrics")
+            LoggingOTLPMetricExporterHTTP(endpoint=otel_metrics_endpoint)
         )
     ]
 )
@@ -134,15 +145,26 @@ if settings.enable_metrics:
 else:
     logger.info("Enhanced HTTP metrics middleware disabled")
 
+# Log thread metrics configuration for debugging
+logger.info(
+    "Thread metrics configuration",
+    enable_thread_metrics=settings.enable_thread_metrics,
+    thread_metrics_update_interval=settings.thread_metrics_update_interval,
+    thread_metrics_debug_logging=settings.thread_metrics_debug_logging
+)
+
 # Setup thread metrics if enabled
 if settings.enable_thread_metrics:
     from app.monitoring import setup_thread_metrics
-    setup_thread_metrics(
+    result = setup_thread_metrics(
         enable_thread_metrics=settings.enable_thread_metrics,
-        thread_metrics_update_interval=settings.thread_metrics_update_interval,
-        thread_metrics_debug_logging=settings.thread_metrics_debug_logging
+        update_interval=settings.thread_metrics_update_interval,
+        debug_logging=settings.thread_metrics_debug_logging
     )
-    logger.info("Thread metrics collection enabled")
+    if result:
+        logger.info("Thread metrics collection enabled successfully")
+    else:
+        logger.error("Thread metrics collection setup failed")
 else:
     logger.info("Thread metrics collection disabled")
 

@@ -30,6 +30,37 @@ spec:
               value: "true"
             - name: METRICS_DEBUG_LOGGING
               value: "false"
+            # Thread Metrics Configuration
+            - name: ENABLE_THREAD_METRICS
+              value: "true"
+            - name: THREAD_METRICS_UPDATE_INTERVAL
+              value: "1.0"
+            - name: THREAD_METRICS_DEBUG_LOGGING
+              value: "false"
+            # OpenTelemetry Configuration
+            - name: OTEL_SERVICE_NAME
+              value: "globeco-portfolio-service"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "otel-collector-collector.monitoring.svc.cluster.local:4317"
+            - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+              value: "http://otel-collector-collector.monitoring.svc.cluster.local:4318/v1/traces"
+            - name: OTEL_EXPORTER_OTLP_METRICS_ENDPOINT
+              value: "http://otel-collector-collector.monitoring.svc.cluster.local:4318/v1/metrics"
+            - name: OTEL_EXPORTER_OTLP_INSECURE
+              value: "true"
+            # Pod information for k8sattributes processor
+            - name: MY_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: MY_POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: MY_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
           resources:
             requests:
               cpu: "200m"
