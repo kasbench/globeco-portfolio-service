@@ -37,9 +37,19 @@ spec:
               value: "1.0"
             - name: THREAD_METRICS_DEBUG_LOGGING
               value: "false"
+            # Service Namespace Label
+            - name: SERVICE_NAMESPACE
+              value: "globeco"
+            # OpenTelemetry Metrics Export Configuration
+            - name: OTEL_METRICS_EXPORT_INTERVAL_SECONDS
+              value: "10"
+            - name: OTEL_METRICS_EXPORT_TIMEOUT_SECONDS
+              value: "5"
             # OpenTelemetry Configuration
             - name: OTEL_SERVICE_NAME
               value: "globeco-portfolio-service"
+            - name: OTEL_SERVICE_NAMESPACE
+              value: "globeco"
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: "otel-collector-collector.monitoring.svc.cluster.local:4317"
             - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
@@ -64,10 +74,10 @@ spec:
           resources:
             requests:
               cpu: "200m"
-              memory: "200Mi"
+              memory: "400Mi"
             limits:
               cpu: "1000m"
-              memory: "200Mi"
+              memory: "800Mi"
           livenessProbe:
             httpGet:
               path: /

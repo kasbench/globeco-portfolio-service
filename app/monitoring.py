@@ -2396,17 +2396,21 @@ class ThreadMetricsCollector:
                 total_delta = total_count - self._otel_values['workers_total']
                 max_configured_delta = max_configured - self._otel_values['workers_max_configured']
                 
+                # Prepare attributes for OpenTelemetry thread metrics
+                from app.config import settings
+                thread_attributes = {"service_namespace": settings.service_namespace}
+                
                 # Update OpenTelemetry metrics with deltas
                 if active_delta != 0:
-                    otel_http_workers_active.add(active_delta)
+                    otel_http_workers_active.add(active_delta, attributes=thread_attributes)
                     self._otel_values['workers_active'] = active_count
                 
                 if total_delta != 0:
-                    otel_http_workers_total.add(total_delta)
+                    otel_http_workers_total.add(total_delta, attributes=thread_attributes)
                     self._otel_values['workers_total'] = total_count
                 
                 if max_configured_delta != 0:
-                    otel_http_workers_max_configured.add(max_configured_delta)
+                    otel_http_workers_max_configured.add(max_configured_delta, attributes=thread_attributes)
                     self._otel_values['workers_max_configured'] = max_configured
                 
                 logger.debug(
@@ -2478,12 +2482,16 @@ class ThreadMetricsCollector:
             
             # Update OpenTelemetry metrics (for collector export)
             try:
+                # Prepare attributes for OpenTelemetry queue metrics
+                from app.config import settings
+                queue_attributes = {"service_namespace": settings.service_namespace}
+                
                 # Calculate delta for UpDownCounter metric
                 queued_delta = queued_count - self._otel_values['requests_queued']
                 
                 # Update OpenTelemetry metric with delta
                 if queued_delta != 0:
-                    otel_http_requests_queued.add(queued_delta)
+                    otel_http_requests_queued.add(queued_delta, attributes=queue_attributes)
                     self._otel_values['requests_queued'] = queued_count
                 
                 logger.debug(
@@ -2730,7 +2738,9 @@ class EnhancedHTTPMetricsMiddleware(BaseHTTPMiddleware):
         
         # Increment OpenTelemetry in-flight gauge
         try:
-            otel_http_requests_in_flight.add(1)
+            from app.config import settings
+            in_flight_attributes = {"service_namespace": settings.service_namespace}
+            otel_http_requests_in_flight.add(1, attributes=in_flight_attributes)
             otel_in_flight_incremented = True
             if self.debug_logging:
                 logger.debug(
@@ -2910,7 +2920,9 @@ class EnhancedHTTPMetricsMiddleware(BaseHTTPMiddleware):
             # Decrement OpenTelemetry in-flight gauge
             if otel_in_flight_incremented:
                 try:
-                    otel_http_requests_in_flight.add(-1)
+                    from app.config import settings
+                    in_flight_attributes = {"service_namespace": settings.service_namespace}
+                    otel_http_requests_in_flight.add(-1, attributes=in_flight_attributes)
                     if self.debug_logging:
                         logger.debug(
                             "Successfully decremented OpenTelemetry in-flight requests gauge",
@@ -2966,10 +2978,12 @@ class EnhancedHTTPMetricsMiddleware(BaseHTTPMiddleware):
             )
 
         # Prepare attributes for OpenTelemetry metrics
+        from app.config import settings
         otel_attributes = {
             "method": method,
             "path": path,
-            "status": status
+            "status": status,
+            "service_namespace": settings.service_namespace
         }
 
         # Record Prometheus counter metrics with error handling

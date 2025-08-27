@@ -24,6 +24,7 @@ logger = setup_logging(log_level=settings.log_level)
 resource = Resource.create({
     "service.name": "globeco-portfolio-service",
     "service.version": "1.0.0",
+    "service.namespace": "globeco",
     "k8s.pod.name": os.getenv("MY_POD_NAME", os.getenv("HOSTNAME", "unknown")),
     "k8s.pod.ip": os.getenv("MY_POD_IP", "unknown"),
     "k8s.namespace.name": "globeco",
@@ -93,11 +94,21 @@ otel_metrics_endpoint = os.getenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "http:/
 
 # Metrics setup (prefer single exporter to avoid duplicates)
 from opentelemetry.metrics import set_meter_provider
+
+logger.info(
+    "Configuring OpenTelemetry metrics export",
+    endpoint=otel_metrics_endpoint,
+    export_interval_seconds=settings.otel_metrics_export_interval_seconds,
+    export_timeout_seconds=settings.otel_metrics_export_timeout_seconds
+)
+
 meter_provider = MeterProvider(
     resource=resource,
     metric_readers=[
         LoggingPeriodicExportingMetricReader(
-            LoggingOTLPMetricExporterHTTP(endpoint=otel_metrics_endpoint)
+            LoggingOTLPMetricExporterHTTP(endpoint=otel_metrics_endpoint),
+            export_interval_millis=settings.otel_metrics_export_interval_seconds * 1000,  # Convert to milliseconds
+            export_timeout_millis=settings.otel_metrics_export_timeout_seconds * 1000     # Convert to milliseconds
         )
     ]
 )
@@ -175,57 +186,50 @@ FastAPIInstrumentor().instrument_app(app)
 metrics_app = make_asgi_app()
 app.mount("/metrics", metrics_app)
 
-# Add explicit route for /metrics (without trailing slash)
+# Add explicit route for /metrics (without trailing slash) with service_namespace label
 @app.get("/metrics")
 async def get_metrics():
-    from fastapi import Request
     from fastapi.responses import Response
-    import asyncio
+    from prometheus_client import generate_latest
     
-    # Create a mock request for the metrics app
-    scope = {
-        'type': 'http',
-        'method': 'GET',
-        'path': '/',
-        'query_string': b'',
-        'headers': [],
-    }
+    # Generate metrics and add service_namespace label
+    metrics_output = generate_latest().decode('utf-8')
     
-    # Call the metrics app directly
-    response_started = False
-    status_code = 200
-    headers = []
-    body_parts = []
+    # Add service_namespace label to all metrics
+    lines = metrics_output.split('\n')
+    modified_lines = []
     
-    async def receive():
-        return {'type': 'http.request', 'body': b''}
+    for line in lines:
+        if line.startswith('#') or not line.strip():
+            # Keep comments and empty lines as-is
+            modified_lines.append(line)
+        elif '{' in line:
+            # Metric with existing labels - add service_namespace
+            metric_name, rest = line.split('{', 1)
+            labels, value = rest.split('}', 1)
+            if labels:
+                modified_line = f'{metric_name}{{service_namespace="{settings.service_namespace}",{labels}}}{value}'
+            else:
+                modified_line = f'{metric_name}{{service_namespace="{settings.service_namespace}"}}{value}'
+            modified_lines.append(modified_line)
+        elif ' ' in line:
+            # Metric without labels - add service_namespace
+            parts = line.split(' ', 1)
+            if len(parts) == 2:
+                metric_name, value = parts
+                modified_line = f'{metric_name}{{service_namespace="{settings.service_namespace}"}} {value}'
+                modified_lines.append(modified_line)
+            else:
+                modified_lines.append(line)
+        else:
+            modified_lines.append(line)
     
-    async def send(message):
-        nonlocal response_started, status_code, headers, body_parts
-        if message['type'] == 'http.response.start':
-            response_started = True
-            status_code = message['status']
-            headers = message.get('headers', [])
-        elif message['type'] == 'http.response.body':
-            body_parts.append(message.get('body', b''))
+    modified_output = '\n'.join(modified_lines)
     
-    await metrics_app(scope, receive, send)
-    
-    # Combine body parts
-    body = b''.join(body_parts)
-    
-    # Convert headers to the format FastAPI expects
-    response_headers = {}
-    for header_pair in headers:
-        if len(header_pair) == 2:
-            key, value = header_pair
-            if isinstance(key, bytes):
-                key = key.decode('utf-8')
-            if isinstance(value, bytes):
-                value = value.decode('utf-8')
-            response_headers[key] = value
-    
-    return Response(content=body, status_code=status_code, headers=response_headers)
+    return Response(
+        content=modified_output,
+        media_type="text/plain; version=0.0.4; charset=utf-8"
+    )
 
 # Configure CORS to allow all origins
 app.add_middleware(
