@@ -13,13 +13,31 @@ spec:
   selector:
     app: globeco-portfolio-service-mongodb
 ---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: portfolio-service-mongodb-pvc
+  namespace: globeco
+  labels:
+    app: globeco-portfolio-service-mongodb
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: local-storage
+  selector:
+    matchLabels:
+      app: portfolio-service-mongodb
+      type: local
+---
 apiVersion: apps/v1
-kind: StatefulSet
+kind: Deployment
 metadata:
   name: globeco-portfolio-service-mongodb
   namespace: globeco
 spec:
-  serviceName: globeco-portfolio-service-mongodb
   replicas: 1
   selector:
     matchLabels:
@@ -44,12 +62,7 @@ spec:
             limits:
               cpu: "500m"
               memory: "1Gi"
-  volumeClaimTemplates:
-    - metadata:
-        name: mongodb-data
-      spec:
-        accessModes: [ "ReadWriteOnce" ]
-        resources:
-          requests:
-            storage: 5Gi
-        storageClassName: local-storage 
+      volumes:
+        - name: mongodb-data
+          persistentVolumeClaim:
+            claimName: portfolio-service-mongodb-pvc 
