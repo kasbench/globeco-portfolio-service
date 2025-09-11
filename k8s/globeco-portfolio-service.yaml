@@ -22,6 +22,11 @@ spec:
           ports:
             - containerPort: 8000
           env:
+            # Inject the node IP from the Downward API
+            - name: NODE_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
             - name: MONGODB_URI
               value: "mongodb://globeco-portfolio-service-mongodb:27017"
             - name: OTEL_METRICS_LOGGING_ENABLED
@@ -51,11 +56,11 @@ spec:
             - name: OTEL_SERVICE_NAMESPACE
               value: "globeco"
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
-              value: "otel-collector-collector.monitoring.svc.cluster.local:4317"
+              value: "$(NODE_IP):4317"
             - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
-              value: "http://otel-collector-collector.monitoring.svc.cluster.local:4318/v1/traces"
+              value: "http://$(NODE_IP):4318/v1/traces"
             - name: OTEL_EXPORTER_OTLP_METRICS_ENDPOINT
-              value: "http://otel-collector-collector.monitoring.svc.cluster.local:4318/v1/metrics"
+              value: "http://$(NODE_IP):4318/v1/metrics"
             - name: OTEL_EXPORTER_OTLP_INSECURE
               value: "true"
             # Pod information for k8sattributes processor
