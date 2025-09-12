@@ -33,8 +33,8 @@ resource = Resource.create({
 })
 
 # Get OpenTelemetry endpoints from environment variables with fallbacks
-otel_grpc_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "otel-collector-collector.monitoring.svc.cluster.local:4317")
-otel_http_endpoint = os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "http://otel-collector-collector.monitoring.svc.cluster.local:4318/v1/traces")
+otel_grpc_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "otel-collector-deamonset-collector.monitoring.svc.cluster.local:4317")
+otel_http_endpoint = os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "http://otel-collector-daemonset-collector.monitoring.svc.cluster.local:4318/v1/traces")
 
 # Tracing setup (gRPC and HTTP exporters)
 trace.set_tracer_provider(TracerProvider(resource=resource))
