@@ -55,6 +55,7 @@ spec:
               value: "globeco-portfolio-service"
             - name: OTEL_SERVICE_NAMESPACE
               value: "globeco"
+            # Use NODE_IP for daemonset + hostport routing
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: "$(NODE_IP):4317"
             - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT

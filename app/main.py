@@ -33,8 +33,8 @@ resource = Resource.create({
 })
 
 # Get OpenTelemetry endpoints from environment variables with fallbacks
-otel_grpc_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "otel-collector-deamonset-collector.monitoring.svc.cluster.local:4317")
-otel_http_endpoint = os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "http://otel-collector-daemonset-collector.monitoring.svc.cluster.local:4318/v1/traces")
+otel_grpc_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "otel-collector.monitor.svc.cluster.local:4317")
+otel_http_endpoint = os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "http://otel-collector.monitor.svc.cluster.local:4318/v1/traces")
 
 # Tracing setup (gRPC and HTTP exporters)
 trace.set_tracer_provider(TracerProvider(resource=resource))
@@ -46,54 +46,12 @@ tracer_provider.add_span_processor(BatchSpanProcessor(
     OTLPSpanExporterHTTP(endpoint=otel_http_endpoint)
 ))
 
-# Custom Metric Reader with Logging
-class LoggingPeriodicExportingMetricReader(PeriodicExportingMetricReader):
-    def _receive_metrics(self, *args, **kwargs):
-        if settings.otel_metrics_logging_enabled:
-            logging.info("Sending metrics to OTel collector via %s exporter", type(self._exporter).__name__)
-        return super()._receive_metrics(*args, **kwargs)
-
-# Custom Exporters with Logging
-from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter as OTLPMetricExporterGRPCBase
-from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter as OTLPMetricExporterHTTPBase
-
-class LoggingOTLPMetricExporterGRPC(OTLPMetricExporterGRPCBase):
-    def export(self, metrics, *args, **kwargs):
-        if settings.otel_metrics_logging_enabled:
-            try:
-                resource_metrics = getattr(metrics, "resource_metrics", [])
-                for i, resource_metric in enumerate(resource_metrics):
-                    resource_attrs = getattr(resource_metric.resource, "attributes", {})
-                    scope_metrics = getattr(resource_metric, "scope_metrics", [])
-                    logging.info(f"[OTel] [GRPC] ResourceMetric[{i}]: {len(scope_metrics)} scope metrics, Resource attrs: {resource_attrs}")
-            except Exception as e:
-                logging.warning(f"[OTel] [GRPC] Error summarizing metrics for logging: {e}")
-        result = super().export(metrics, *args, **kwargs)
-        if settings.otel_metrics_logging_enabled:
-            logging.info(f"[OTel] [GRPC] Export result: {result}")
-        return result
-
-class LoggingOTLPMetricExporterHTTP(OTLPMetricExporterHTTPBase):
-    def export(self, metrics, *args, **kwargs):
-        if settings.otel_metrics_logging_enabled:
-            try:
-                resource_metrics = getattr(metrics, "resource_metrics", [])
-                for i, resource_metric in enumerate(resource_metrics):
-                    resource_attrs = getattr(resource_metric.resource, "attributes", {})
-                    scope_metrics = getattr(resource_metric, "scope_metrics", [])
-                    logging.info(f"[OTel] [HTTP] ResourceMetric[{i}]: {len(scope_metrics)} scope metrics, Resource attrs: {resource_attrs}")
-            except Exception as e:
-                logging.warning(f"[OTel] [HTTP] Error summarizing metrics for logging: {e}")
-        result = super().export(metrics, *args, **kwargs)
-        if settings.otel_metrics_logging_enabled:
-            logging.info(f"[OTel] [HTTP] Export result: {result}")
-        return result
-
 # Get metrics endpoint from environment variables with fallback
-otel_metrics_endpoint = os.getenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "http://otel-collector-collector.monitoring.svc.cluster.local:4318/v1/metrics")
+otel_metrics_endpoint = os.getenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "http://otel-collector.monitor.svc.cluster.local:4318/v1/metrics")
 
-# Metrics setup (prefer single exporter to avoid duplicates)
+# Metrics setup - use standard exporter without custom logging
 from opentelemetry.metrics import set_meter_provider
+from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
 
 logger.info(
     "Configuring OpenTelemetry metrics export",
@@ -102,15 +60,19 @@ logger.info(
     export_timeout_seconds=settings.otel_metrics_export_timeout_seconds
 )
 
+# Create standard metric exporter
+metric_exporter = OTLPMetricExporter(endpoint=otel_metrics_endpoint)
+
+# Create metric reader with standard exporter
+metric_reader = PeriodicExportingMetricReader(
+    exporter=metric_exporter,
+    export_interval_millis=settings.otel_metrics_export_interval_seconds * 1000,  # Convert to milliseconds
+    export_timeout_millis=settings.otel_metrics_export_timeout_seconds * 1000     # Convert to milliseconds
+)
+
 meter_provider = MeterProvider(
     resource=resource,
-    metric_readers=[
-        LoggingPeriodicExportingMetricReader(
-            LoggingOTLPMetricExporterHTTP(endpoint=otel_metrics_endpoint),
-            export_interval_millis=settings.otel_metrics_export_interval_seconds * 1000,  # Convert to milliseconds
-            export_timeout_millis=settings.otel_metrics_export_timeout_seconds * 1000     # Convert to milliseconds
-        )
-    ]
+    metric_readers=[metric_reader]
 )
 set_meter_provider(meter_provider)
 

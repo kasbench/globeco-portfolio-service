@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: otel-collector
+  namespace: monitor
+  labels:
+    app: otel-collector
+spec:
+  selector:
+    matchLabels:
+      app: otel-collector
+  template:
+    metadata:
+      labels:
+        app: otel-collector
+    spec:
+      containers:
+        - name: otel-collector
+          image: otel/opentelemetry-collector-contrib:latest
+          command:
+            - "/otelcol-contrib"
+            - "--config=/etc/otel/config.yaml"
+          volumeMounts:
+            - name: otel-config
+              mountPath: /etc/otel
+          ports:
+            - containerPort: 4317  # OTLP gRPC
+              hostPort: 4317       # Expose on host
+              protocol: TCP
+            - containerPort: 4318  # OTLP HTTP
+              hostPort: 4318       # Expose on host
+              protocol: TCP
+            - containerPort: 8889  # Prometheus exporter
+              hostPort: 8889       # Expose on host
+              protocol: TCP
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          env:
+            - name: MY_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: MY_POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+      volumes:
+        - name: otel-config
+          configMap:
+            name: otel-collector-config
+      hostNetwork: false  # Use pod network but expose via hostPort
+      dnsPolicy: ClusterFirst
+---
+# Optional: Service for discovery (not used for metrics routing in daemonset setup)
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector
+  namespace: monitor
+  labels:
+    app: otel-collector
+spec:
+  selector:
+    app: otel-collector
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318
+    - name: prometheus
+      port: 8889
+      targetPort: 8889
+  type: ClusterIP

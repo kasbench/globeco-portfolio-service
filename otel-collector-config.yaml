@@ -13,16 +13,43 @@ data:
           http:
             endpoint: "0.0.0.0:4318"
 
+    processors:
+      batch:
+        timeout: 1s
+        send_batch_size: 1024
+      memory_limiter:
+        limit_mib: 512
+      resource:
+        attributes:
+          - key: service.namespace
+            value: "globeco"
+            action: upsert
+          - key: deployment.environment
+            value: "production"
+            action: upsert
+
     exporters:
       prometheus:
         endpoint: "0.0.0.0:8889"
-      debug: {}
+        # Remove namespace to avoid otel_ prefix
+        const_labels:
+          service_namespace: "globeco"
+        # Add metric relabeling to ensure proper export
+        metric_relabeling:
+          - source_labels: [__name__]
+            regex: '(.+)'
+            target_label: __name__
+            replacement: '${1}'
+      debug:
+        verbosity: detailed
 
     service:
       pipelines:
         metrics:
           receivers: [otlp]
-          exporters: [prometheus]
+          processors: [memory_limiter, resource, batch]
+          exporters: [prometheus, debug]
         traces:
           receivers: [otlp]
+          processors: [memory_limiter, batch]
           exporters: [debug]

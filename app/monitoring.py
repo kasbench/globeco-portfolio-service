@@ -241,7 +241,7 @@ HTTP_REQUESTS_QUEUED = _get_or_create_metric(
 # Create OpenTelemetry metrics (for collector export)
 # These will be sent to the OpenTelemetry Collector and then to Prometheus
 try:
-    meter = metrics.get_meter(__name__)
+    meter = metrics.get_meter("app.monitoring")
     
     # OpenTelemetry HTTP metrics
     otel_http_requests_total = meter.create_counter(
@@ -2398,7 +2398,9 @@ class ThreadMetricsCollector:
                 
                 # Prepare attributes for OpenTelemetry thread metrics
                 from app.config import settings
-                thread_attributes = {"service_namespace": settings.service_namespace}
+                thread_attributes = {
+                    "service_name": "globeco-portfolio-service"
+                }
                 
                 # Update OpenTelemetry metrics with deltas
                 if active_delta != 0:
@@ -2484,7 +2486,9 @@ class ThreadMetricsCollector:
             try:
                 # Prepare attributes for OpenTelemetry queue metrics
                 from app.config import settings
-                queue_attributes = {"service_namespace": settings.service_namespace}
+                queue_attributes = {
+                    "service_name": "globeco-portfolio-service"
+                }
                 
                 # Calculate delta for UpDownCounter metric
                 queued_delta = queued_count - self._otel_values['requests_queued']
@@ -2739,7 +2743,9 @@ class EnhancedHTTPMetricsMiddleware(BaseHTTPMiddleware):
         # Increment OpenTelemetry in-flight gauge
         try:
             from app.config import settings
-            in_flight_attributes = {"service_namespace": settings.service_namespace}
+            in_flight_attributes = {
+                "service_name": "globeco-portfolio-service"
+            }
             otel_http_requests_in_flight.add(1, attributes=in_flight_attributes)
             otel_in_flight_incremented = True
             if self.debug_logging:
@@ -2921,7 +2927,9 @@ class EnhancedHTTPMetricsMiddleware(BaseHTTPMiddleware):
             if otel_in_flight_incremented:
                 try:
                     from app.config import settings
-                    in_flight_attributes = {"service_namespace": settings.service_namespace}
+                    in_flight_attributes = {
+                        "service_name": "globeco-portfolio-service"
+                    }
                     otel_http_requests_in_flight.add(-1, attributes=in_flight_attributes)
                     if self.debug_logging:
                         logger.debug(
@@ -2977,13 +2985,13 @@ class EnhancedHTTPMetricsMiddleware(BaseHTTPMiddleware):
                 duration_ms=duration_ms,
             )
 
-        # Prepare attributes for OpenTelemetry metrics
+        # Prepare attributes for OpenTelemetry metrics matching working service format
         from app.config import settings
         otel_attributes = {
             "method": method,
             "path": path,
             "status": status,
-            "service_namespace": settings.service_namespace
+            "service_name": "globeco-portfolio-service"
         }
 
         # Record Prometheus counter metrics with error handling
