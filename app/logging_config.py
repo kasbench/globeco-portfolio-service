@@ -213,7 +213,7 @@ def setup_logging(log_level: str = "INFO", application: str = "globeco-portfolio
     root_logger.addHandler(console_handler)
     
     # Reduce noise from some third-party libraries
-    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+    logging.getLogger("uvicorn.access").setLevel(logging.INFO)
     logging.getLogger("httpx").setLevel(logging.WARNING)
     
     return StructuredLogger("app")
