@@ -81,7 +81,7 @@ spec:
               value: "INFO"
           resources:
             requests:
-              cpu: "400m"
+              cpu: "600m"
               memory: "400Mi"
             limits:
               cpu: "1000m"
