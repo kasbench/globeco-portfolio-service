@@ -50,6 +50,7 @@ tracer_provider.add_span_processor(BatchSpanProcessor(
 otel_metrics_endpoint = os.getenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "http://otel-collector.monitor.svc.cluster.local:4318/v1/metrics")
 
 # Metrics setup - use standard exporter without custom logging
+from opentelemetry import metrics
 from opentelemetry.metrics import set_meter_provider
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
 
@@ -60,21 +61,74 @@ logger.info(
     export_timeout_seconds=settings.otel_metrics_export_timeout_seconds
 )
 
-# Create standard metric exporter
-metric_exporter = OTLPMetricExporter(endpoint=otel_metrics_endpoint)
+# Create standard metric exporter with additional logging
+try:
+    metric_exporter = OTLPMetricExporter(endpoint=otel_metrics_endpoint)
+    logger.info(
+        "OpenTelemetry metric exporter created successfully",
+        endpoint=otel_metrics_endpoint,
+        exporter_type="OTLPMetricExporter"
+    )
+except Exception as e:
+    logger.error(
+        "Failed to create OpenTelemetry metric exporter",
+        endpoint=otel_metrics_endpoint,
+        error=str(e),
+        error_type=type(e).__name__,
+        exc_info=True
+    )
+    raise
 
 # Create metric reader with standard exporter
-metric_reader = PeriodicExportingMetricReader(
-    exporter=metric_exporter,
-    export_interval_millis=settings.otel_metrics_export_interval_seconds * 1000,  # Convert to milliseconds
-    export_timeout_millis=settings.otel_metrics_export_timeout_seconds * 1000     # Convert to milliseconds
-)
+try:
+    metric_reader = PeriodicExportingMetricReader(
+        exporter=metric_exporter,
+        export_interval_millis=settings.otel_metrics_export_interval_seconds * 1000,  # Convert to milliseconds
+        export_timeout_millis=settings.otel_metrics_export_timeout_seconds * 1000     # Convert to milliseconds
+    )
+    logger.info(
+        "OpenTelemetry metric reader created successfully",
+        export_interval_millis=settings.otel_metrics_export_interval_seconds * 1000,
+        export_timeout_millis=settings.otel_metrics_export_timeout_seconds * 1000,
+        reader_type="PeriodicExportingMetricReader"
+    )
+except Exception as e:
+    logger.error(
+        "Failed to create OpenTelemetry metric reader",
+        export_interval_seconds=settings.otel_metrics_export_interval_seconds,
+        export_timeout_seconds=settings.otel_metrics_export_timeout_seconds,
+        error=str(e),
+        error_type=type(e).__name__,
+        exc_info=True
+    )
+    raise
 
 meter_provider = MeterProvider(
     resource=resource,
     metric_readers=[metric_reader]
 )
 set_meter_provider(meter_provider)
+
+# Initialize OpenTelemetry metrics after meter provider is set up
+from app.monitoring import initialize_otel_metrics
+
+# Log the current meter provider before initializing custom metrics
+current_meter_provider = metrics.get_meter_provider()
+logger.info(
+    "Current meter provider before custom metrics initialization",
+    meter_provider_type=type(current_meter_provider).__name__,
+    meter_provider_id=id(current_meter_provider),
+    is_same_as_configured=current_meter_provider is meter_provider
+)
+
+otel_metrics_initialized = initialize_otel_metrics()
+logger.info(
+    "OpenTelemetry metrics initialization completed",
+    success=otel_metrics_initialized,
+    meter_provider_set=True,
+    configured_meter_provider_id=id(meter_provider),
+    current_meter_provider_id=id(current_meter_provider)
+)
 
 # Instrument HTTPX and logging globally
 HTTPXClientInstrumentor().instrument()

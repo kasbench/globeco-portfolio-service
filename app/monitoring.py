@@ -238,79 +238,109 @@ HTTP_REQUESTS_QUEUED = _get_or_create_metric(
     'Number of pending requests waiting in the queue for thread assignment'
 )
 
-# Create OpenTelemetry metrics (for collector export)
-# These will be sent to the OpenTelemetry Collector and then to Prometheus
-try:
-    meter = metrics.get_meter("app.monitoring")
+# OpenTelemetry metrics - initialized later after meter provider is set up
+otel_http_requests_total = None
+otel_http_request_duration = None
+otel_http_requests_in_flight = None
+otel_http_workers_active = None
+otel_http_workers_total = None
+otel_http_workers_max_configured = None
+otel_http_requests_queued = None
+
+def initialize_otel_metrics():
+    """
+    Initialize OpenTelemetry metrics after the meter provider has been set up.
+    This must be called after set_meter_provider() in main.py.
+    """
+    global otel_http_requests_total, otel_http_request_duration, otel_http_requests_in_flight
+    global otel_http_workers_active, otel_http_workers_total, otel_http_workers_max_configured, otel_http_requests_queued
     
-    # OpenTelemetry HTTP metrics
-    otel_http_requests_total = meter.create_counter(
-        name="http_requests_total",
-        description="Total number of HTTP requests",
-        unit="1"
-    )
-    
-    otel_http_request_duration = meter.create_histogram(
-        name="http_request_duration",
-        description="HTTP request duration in milliseconds", 
-        unit="ms"
-    )
-    
-    otel_http_requests_in_flight = meter.create_up_down_counter(
-        name="http_requests_in_flight",
-        description="Number of HTTP requests currently being processed",
-        unit="1"
-    )
-    
-    # OpenTelemetry thread worker metrics
-    otel_http_workers_active = meter.create_up_down_counter(
-        name="http_workers_active",
-        description="Number of threads currently executing requests or performing work",
-        unit="1"
-    )
-    
-    otel_http_workers_total = meter.create_up_down_counter(
-        name="http_workers_total",
-        description="Total number of threads currently alive in the thread pool",
-        unit="1"
-    )
-    
-    otel_http_workers_max_configured = meter.create_up_down_counter(
-        name="http_workers_max_configured",
-        description="Maximum number of threads that can be created in the thread pool",
-        unit="1"
-    )
-    
-    otel_http_requests_queued = meter.create_up_down_counter(
-        name="http_requests_queued",
-        description="Number of pending requests waiting in the queue for thread assignment",
-        unit="1"
-    )
-    
-    logger.info("Successfully created OpenTelemetry HTTP and thread metrics")
-    
-except Exception as e:
-    logger.error(
-        "Failed to create OpenTelemetry metrics",
-        error=str(e),
-        error_type=type(e).__name__,
-        exc_info=True
-    )
-    # Create dummy metrics as fallback
-    class DummyOTelMetric:
-        def add(self, amount, attributes=None):
-            pass
-        def record(self, amount, attributes=None):
-            pass
-    
-    otel_http_requests_total = DummyOTelMetric()
-    otel_http_request_duration = DummyOTelMetric()
-    otel_http_requests_in_flight = DummyOTelMetric()
-    otel_http_workers_active = DummyOTelMetric()
-    otel_http_workers_total = DummyOTelMetric()
-    otel_http_workers_max_configured = DummyOTelMetric()
-    otel_http_requests_queued = DummyOTelMetric()
-    logger.warning("Created dummy OpenTelemetry metrics due to initialization failure")
+    try:
+        # Get the current meter provider to ensure we're using the same one configured for export
+        meter_provider = metrics.get_meter_provider()
+        logger.info(
+            "Getting meter from current meter provider for custom metrics",
+            meter_provider_type=type(meter_provider).__name__,
+            meter_name="app.monitoring"
+        )
+        
+        meter = metrics.get_meter("app.monitoring")
+        
+        # OpenTelemetry HTTP metrics
+        otel_http_requests_total = meter.create_counter(
+            name="http_requests_total",
+            description="Total number of HTTP requests",
+            unit="1"
+        )
+        
+        otel_http_request_duration = meter.create_histogram(
+            name="http_request_duration",
+            description="HTTP request duration in milliseconds", 
+            unit="ms"
+        )
+        
+        otel_http_requests_in_flight = meter.create_up_down_counter(
+            name="http_requests_in_flight",
+            description="Number of HTTP requests currently being processed",
+            unit="1"
+        )
+        
+        # OpenTelemetry thread worker metrics
+        otel_http_workers_active = meter.create_up_down_counter(
+            name="http_workers_active",
+            description="Number of threads currently executing requests or performing work",
+            unit="1"
+        )
+        
+        otel_http_workers_total = meter.create_up_down_counter(
+            name="http_workers_total",
+            description="Total number of threads currently alive in the thread pool",
+            unit="1"
+        )
+        
+        otel_http_workers_max_configured = meter.create_up_down_counter(
+            name="http_workers_max_configured",
+            description="Maximum number of threads that can be created in the thread pool",
+            unit="1"
+        )
+        
+        otel_http_requests_queued = meter.create_up_down_counter(
+            name="http_requests_queued",
+            description="Number of pending requests waiting in the queue for thread assignment",
+            unit="1"
+        )
+        
+        logger.info(
+            "Successfully created OpenTelemetry HTTP and thread metrics",
+            meter_provider_type=type(meter_provider).__name__,
+            meter_type=type(meter).__name__,
+            custom_metrics_created=True
+        )
+        return True
+        
+    except Exception as e:
+        logger.error(
+            "Failed to create OpenTelemetry metrics",
+            error=str(e),
+            error_type=type(e).__name__,
+            exc_info=True
+        )
+        # Create dummy metrics as fallback
+        class DummyOTelMetric:
+            def add(self, amount, attributes=None):
+                pass
+            def record(self, amount, attributes=None):
+                pass
+        
+        otel_http_requests_total = DummyOTelMetric()
+        otel_http_request_duration = DummyOTelMetric()
+        otel_http_requests_in_flight = DummyOTelMetric()
+        otel_http_workers_active = DummyOTelMetric()
+        otel_http_workers_total = DummyOTelMetric()
+        otel_http_workers_max_configured = DummyOTelMetric()
+        otel_http_requests_queued = DummyOTelMetric()
+        logger.warning("Created dummy OpenTelemetry metrics due to initialization failure")
+        return False
 
 
 # Thread Detection and Enumeration Functions
@@ -2403,15 +2433,15 @@ class ThreadMetricsCollector:
                 }
                 
                 # Update OpenTelemetry metrics with deltas
-                if active_delta != 0:
+                if active_delta != 0 and otel_http_workers_active is not None:
                     otel_http_workers_active.add(active_delta, attributes=thread_attributes)
                     self._otel_values['workers_active'] = active_count
                 
-                if total_delta != 0:
+                if total_delta != 0 and otel_http_workers_total is not None:
                     otel_http_workers_total.add(total_delta, attributes=thread_attributes)
                     self._otel_values['workers_total'] = total_count
                 
-                if max_configured_delta != 0:
+                if max_configured_delta != 0 and otel_http_workers_max_configured is not None:
                     otel_http_workers_max_configured.add(max_configured_delta, attributes=thread_attributes)
                     self._otel_values['workers_max_configured'] = max_configured
                 
@@ -2494,7 +2524,7 @@ class ThreadMetricsCollector:
                 queued_delta = queued_count - self._otel_values['requests_queued']
                 
                 # Update OpenTelemetry metric with delta
-                if queued_delta != 0:
+                if queued_delta != 0 and otel_http_requests_queued is not None:
                     otel_http_requests_queued.add(queued_delta, attributes=queue_attributes)
                     self._otel_values['requests_queued'] = queued_count
                 
@@ -2683,6 +2713,14 @@ class EnhancedHTTPMetricsMiddleware(BaseHTTPMiddleware):
         Returns:
             Response with metrics recorded for the request
         """
+        # ALWAYS log that middleware is being triggered
+        logger.info(
+            "EnhancedHTTPMetricsMiddleware processing request",
+            method=getattr(request, 'method', 'UNKNOWN'),
+            path=getattr(request.url, 'path', 'unknown') if hasattr(request, 'url') else 'unknown',
+            middleware_active=True
+        )
+        
         # Start high-precision timing using perf_counter for millisecond precision
         start_time = time.perf_counter()
         
@@ -2741,20 +2779,33 @@ class EnhancedHTTPMetricsMiddleware(BaseHTTPMiddleware):
             )
         
         # Increment OpenTelemetry in-flight gauge
+        # Import dynamically to get current values after initialization
         try:
-            from app.config import settings
-            in_flight_attributes = {
-                "service_name": "globeco-portfolio-service"
-            }
-            otel_http_requests_in_flight.add(1, attributes=in_flight_attributes)
-            otel_in_flight_incremented = True
-            if self.debug_logging:
-                logger.debug(
-                    "Successfully incremented OpenTelemetry in-flight requests gauge",
-                    method=request_method,
-                    path=request_path,
-                    gauge_operation="increment"
-                )
+            import app.monitoring as monitoring_module
+            current_otel_in_flight = getattr(monitoring_module, 'otel_http_requests_in_flight', None)
+            
+            if current_otel_in_flight is not None:
+                from app.config import settings
+                # Use minimal attributes for in-flight gauge to match FastAPI pattern
+                in_flight_attributes = {}
+                current_otel_in_flight.add(1, attributes=in_flight_attributes)
+                otel_in_flight_incremented = True
+                if self.debug_logging:
+                    logger.debug(
+                        "Successfully incremented OpenTelemetry in-flight requests gauge",
+                        method=request_method,
+                        path=request_path,
+                        gauge_operation="increment"
+                    )
+            else:
+                if self.debug_logging:
+                    logger.debug(
+                        "Skipping OpenTelemetry in-flight gauge increment - metrics not initialized",
+                        method=request_method,
+                        path=request_path,
+                        reason="otel_metrics_not_initialized",
+                        current_otel_in_flight_type=type(current_otel_in_flight).__name__
+                    )
         except Exception as e:
             logger.error(
                 "Failed to increment OpenTelemetry in-flight requests gauge - continuing request processing",
@@ -2926,18 +2977,29 @@ class EnhancedHTTPMetricsMiddleware(BaseHTTPMiddleware):
             # Decrement OpenTelemetry in-flight gauge
             if otel_in_flight_incremented:
                 try:
-                    from app.config import settings
-                    in_flight_attributes = {
-                        "service_name": "globeco-portfolio-service"
-                    }
-                    otel_http_requests_in_flight.add(-1, attributes=in_flight_attributes)
-                    if self.debug_logging:
-                        logger.debug(
-                            "Successfully decremented OpenTelemetry in-flight requests gauge",
-                            method=request_method,
-                            path=request_path,
-                            gauge_operation="decrement"
-                        )
+                    import app.monitoring as monitoring_module
+                    current_otel_in_flight = getattr(monitoring_module, 'otel_http_requests_in_flight', None)
+                    
+                    if current_otel_in_flight is not None:
+                        from app.config import settings
+                        # Use minimal attributes for in-flight gauge to match FastAPI pattern
+                        in_flight_attributes = {}
+                        current_otel_in_flight.add(-1, attributes=in_flight_attributes)
+                        if self.debug_logging:
+                            logger.debug(
+                                "Successfully decremented OpenTelemetry in-flight requests gauge",
+                                method=request_method,
+                                path=request_path,
+                                gauge_operation="decrement"
+                            )
+                    else:
+                        if self.debug_logging:
+                            logger.debug(
+                                "Cannot decrement OpenTelemetry in-flight gauge - metrics not initialized",
+                                method=request_method,
+                                path=request_path,
+                                reason="otel_metrics_not_initialized"
+                            )
                 except Exception as e:
                     logger.error(
                         "Critical error decrementing OpenTelemetry in-flight requests gauge - gauge may be inaccurate",
@@ -2975,23 +3037,23 @@ class EnhancedHTTPMetricsMiddleware(BaseHTTPMiddleware):
             status: HTTP status code as string
             duration_ms: Request duration in milliseconds
         """
-        # Debug logging for metric values during development
-        if self.debug_logging:
-            logger.debug(
-                "Recording HTTP metrics to both Prometheus and OpenTelemetry",
-                method=method,
-                path=path,
-                status=status,
-                duration_ms=duration_ms,
-            )
+        # ALWAYS log that we're recording metrics (not just debug)
+        logger.info(
+            "Recording HTTP metrics to both Prometheus and OpenTelemetry",
+            method=method,
+            path=path,
+            status=status,
+            duration_ms=duration_ms,
+            middleware_recording=True
+        )
 
-        # Prepare attributes for OpenTelemetry metrics matching working service format
+        # Prepare attributes for OpenTelemetry metrics matching FastAPI instrumentation format
         from app.config import settings
         otel_attributes = {
-            "method": method,
-            "path": path,
-            "status": status,
-            "service_name": "globeco-portfolio-service"
+            "http_method": method,
+            "http_target": path,
+            "http_status_code": status,
+            # Remove service_name as it should come from resource attributes
         }
 
         # Record Prometheus counter metrics with error handling
@@ -3039,14 +3101,37 @@ class EnhancedHTTPMetricsMiddleware(BaseHTTPMiddleware):
             )
 
         # Record OpenTelemetry counter metrics with error handling
+        # Import dynamically to get current values after initialization
         try:
-            otel_http_requests_total.add(1, attributes=otel_attributes)
-            if self.debug_logging:
-                logger.debug(
+            import app.monitoring as monitoring_module
+            current_otel_counter = getattr(monitoring_module, 'otel_http_requests_total', None)
+            
+            # ALWAYS log the current state
+            logger.info(
+                "OpenTelemetry counter metric state check",
+                method=method,
+                path=path,
+                status=status,
+                current_otel_counter_type=type(current_otel_counter).__name__,
+                is_none=current_otel_counter is None,
+                has_add_method=hasattr(current_otel_counter, 'add') if current_otel_counter else False
+            )
+            
+            if current_otel_counter is not None:
+                current_otel_counter.add(1, attributes=otel_attributes)
+                logger.info(
                     "Successfully recorded OpenTelemetry HTTP requests total counter",
                     method=method,
                     path=path,
                     status=status,
+                )
+            else:
+                logger.warning(
+                    "Skipping OpenTelemetry HTTP requests total counter - metrics not initialized",
+                    method=method,
+                    path=path,
+                    status=status,
+                    current_otel_counter_type=type(current_otel_counter).__name__
                 )
         except Exception as e:
             logger.error(
@@ -3060,16 +3145,31 @@ class EnhancedHTTPMetricsMiddleware(BaseHTTPMiddleware):
             )
 
         # Record OpenTelemetry histogram metrics with error handling
+        # Import dynamically to get current values after initialization
         try:
-            otel_http_request_duration.record(duration_ms, attributes=otel_attributes)
-            if self.debug_logging:
-                logger.debug(
-                    "Successfully recorded OpenTelemetry HTTP request duration histogram",
-                    method=method,
-                    path=path,
-                    status=status,
-                    duration_ms=duration_ms,
-                )
+            import app.monitoring as monitoring_module
+            current_otel_histogram = getattr(monitoring_module, 'otel_http_request_duration', None)
+            
+            if current_otel_histogram is not None:
+                current_otel_histogram.record(duration_ms, attributes=otel_attributes)
+                if self.debug_logging:
+                    logger.debug(
+                        "Successfully recorded OpenTelemetry HTTP request duration histogram",
+                        method=method,
+                        path=path,
+                        status=status,
+                        duration_ms=duration_ms,
+                    )
+            else:
+                if self.debug_logging:
+                    logger.debug(
+                        "Skipping OpenTelemetry HTTP request duration histogram - metrics not initialized",
+                        method=method,
+                        path=path,
+                        status=status,
+                        duration_ms=duration_ms,
+                        current_otel_histogram_type=type(current_otel_histogram).__name__
+                    )
         except Exception as e:
             logger.error(
                 "Failed to record OpenTelemetry HTTP request duration histogram",
@@ -3079,27 +3179,6 @@ class EnhancedHTTPMetricsMiddleware(BaseHTTPMiddleware):
                 path=path,
                 status=status,
                 duration_ms=duration_ms,
-                exc_info=True,
-            )
-
-        # Record OpenTelemetry counter metrics with error handling
-        try:
-            otel_http_requests_total.add(1, attributes=otel_attributes)
-            if self.debug_logging:
-                logger.debug(
-                    "Successfully recorded OpenTelemetry HTTP requests total counter",
-                    method=method,
-                    path=path,
-                    status=status,
-                )
-        except Exception as e:
-            logger.error(
-                "Failed to record OpenTelemetry HTTP requests total counter",
-                error=str(e),
-                error_type=type(e).__name__,
-                method=method,
-                path=path,
-                status=status,
                 exc_info=True,
             )
 

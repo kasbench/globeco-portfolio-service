@@ -47,9 +47,9 @@ spec:
               value: "globeco"
             # OpenTelemetry Metrics Export Configuration
             - name: OTEL_METRICS_EXPORT_INTERVAL_SECONDS
-              value: "10"
-            - name: OTEL_METRICS_EXPORT_TIMEOUT_SECONDS
               value: "5"
+            - name: OTEL_METRICS_EXPORT_TIMEOUT_SECONDS
+              value: "10"
             # OpenTelemetry Configuration
             - name: OTEL_SERVICE_NAME
               value: "globeco-portfolio-service"
