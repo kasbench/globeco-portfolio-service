@@ -262,10 +262,10 @@ app.include_router(api_v2.router)
 
 @app.get("/")
 async def root():
-    logger.info("Root endpoint accessed")
+    logger.debug("Root endpoint accessed")
     return {"message": "Hello World"}
 
 @app.get("/health")
 async def health():
-    logger.info("Health check endpoint accessed")
+    logger.debug("Health check endpoint accessed")
     return {"status": "healthy", "service": "globeco-portfolio-service"} 

@@ -14,11 +14,11 @@ router = APIRouter(prefix="/api/v1")
 @router.get("/portfolios", response_model=List[PortfolioResponseDTO])
 async def get_portfolios():
     """Get all portfolios - v1 API (backward compatibility)"""
-    logger.info("API v1: Get all portfolios requested", endpoint="/api/v1/portfolios")
+    logger.debug("API v1: Get all portfolios requested", endpoint="/api/v1/portfolios")
     try:
         portfolios = await PortfolioService.get_all_portfolios()
         result = [PortfolioService.portfolio_to_dto(p) for p in portfolios]
-        logger.info("API v1: Successfully returned all portfolios", 
+        logger.debug("API v1: Successfully returned all portfolios", 
                    endpoint="/api/v1/portfolios", 
                    count=len(result))
         return result
@@ -31,7 +31,7 @@ async def get_portfolios():
 @router.get("/portfolio/{portfolioId}", response_model=PortfolioResponseDTO)
 async def get_portfolio(portfolioId: str):
     """Get a single portfolio by ID - v1 API"""
-    logger.info("API v1: Get portfolio by ID requested", 
+    logger.debug("API v1: Get portfolio by ID requested", 
                endpoint=f"/api/v1/portfolio/{portfolioId}", 
                portfolio_id=portfolioId)
     try:
@@ -43,7 +43,7 @@ async def get_portfolio(portfolioId: str):
             raise HTTPException(status_code=404, detail="Portfolio not found")
         
         result = PortfolioService.portfolio_to_dto(portfolio)
-        logger.info("API v1: Successfully returned portfolio", 
+        logger.debug("API v1: Successfully returned portfolio", 
                    endpoint=f"/api/v1/portfolio/{portfolioId}", 
                    portfolio_id=portfolioId,
                    portfolio_name=portfolio.name)
@@ -60,7 +60,7 @@ async def get_portfolio(portfolioId: str):
 @router.post("/portfolios", response_model=PortfolioResponseDTO, status_code=status.HTTP_201_CREATED)
 async def create_portfolio(dto: PortfolioPostDTO):
     """Create a new portfolio - v1 API"""
-    logger.info("API v1: Create portfolio requested", 
+    logger.debug("API v1: Create portfolio requested", 
                endpoint="/api/v1/portfolios", 
                portfolio_name=dto.name)
     try:
@@ -71,7 +71,7 @@ async def create_portfolio(dto: PortfolioPostDTO):
         )
         await PortfolioService.create_portfolio(portfolio)
         result = PortfolioService.portfolio_to_dto(portfolio)
-        logger.info("API v1: Successfully created portfolio", 
+        logger.debug("API v1: Successfully created portfolio", 
                    endpoint="/api/v1/portfolios", 
                    portfolio_id=str(portfolio.id),
                    portfolio_name=portfolio.name)
@@ -86,7 +86,7 @@ async def create_portfolio(dto: PortfolioPostDTO):
 @router.put("/portfolio/{portfolioId}", response_model=PortfolioResponseDTO)
 async def update_portfolio(portfolioId: str, dto: PortfolioPutDTO):
     """Update an existing portfolio - v1 API"""
-    logger.info("API v1: Update portfolio requested", 
+    logger.debug("API v1: Update portfolio requested", 
                endpoint=f"/api/v1/portfolio/{portfolioId}", 
                portfolio_id=portfolioId,
                new_name=dto.name,
@@ -114,7 +114,7 @@ async def update_portfolio(portfolioId: str, dto: PortfolioPutDTO):
         
         await PortfolioService.update_portfolio(portfolio)
         result = PortfolioService.portfolio_to_dto(portfolio)
-        logger.info("API v1: Successfully updated portfolio", 
+        logger.debug("API v1: Successfully updated portfolio", 
                    endpoint=f"/api/v1/portfolio/{portfolioId}", 
                    portfolio_id=portfolioId,
                    old_name=old_name,
@@ -133,7 +133,7 @@ async def update_portfolio(portfolioId: str, dto: PortfolioPutDTO):
 @router.delete("/portfolio/{portfolioId}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_portfolio(portfolioId: str, version: int):
     """Delete a portfolio - v1 API"""
-    logger.info("API v1: Delete portfolio requested", 
+    logger.debug("API v1: Delete portfolio requested", 
                endpoint=f"/api/v1/portfolio/{portfolioId}", 
                portfolio_id=portfolioId,
                version=version)
@@ -154,7 +154,7 @@ async def delete_portfolio(portfolioId: str, version: int):
             raise HTTPException(status_code=409, detail="Version conflict")
         
         await PortfolioService.delete_portfolio(portfolio)
-        logger.info("API v1: Successfully deleted portfolio", 
+        logger.debug("API v1: Successfully deleted portfolio", 
                    endpoint=f"/api/v1/portfolio/{portfolioId}", 
                    portfolio_id=portfolioId,
                    portfolio_name=portfolio.name)

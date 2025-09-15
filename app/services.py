@@ -15,13 +15,13 @@ class PortfolioService:
     @staticmethod
     async def get_all_portfolios() -> List[Portfolio]:
         """Get all portfolios for v1 API (backward compatibility)"""
-        logger.info("Fetching all portfolios", operation="get_all_portfolios")
+        logger.debug("Fetching all portfolios", operation="get_all_portfolios")
         portfolios = await trace_database_call(
             "find_all",
             "portfolio", 
             lambda: Portfolio.find_all().to_list()
         )
-        logger.info("Successfully fetched all portfolios", 
+        logger.debug("Successfully fetched all portfolios", 
                    operation="get_all_portfolios", 
                    count=len(portfolios))
         return portfolios
@@ -29,7 +29,7 @@ class PortfolioService:
     @staticmethod
     async def get_portfolio_by_id(portfolio_id: str) -> Optional[Portfolio]:
         """Get a single portfolio by ID"""
-        logger.info("Fetching portfolio by ID", 
+        logger.debug("Fetching portfolio by ID", 
                    operation="get_portfolio_by_id", 
                    portfolio_id=portfolio_id)
         try:
@@ -39,7 +39,7 @@ class PortfolioService:
                 lambda: Portfolio.get(ObjectId(portfolio_id))
             )
             if portfolio:
-                logger.info("Successfully found portfolio", 
+                logger.debug("Successfully found portfolio", 
                            operation="get_portfolio_by_id", 
                            portfolio_id=portfolio_id,
                            portfolio_name=portfolio.name)
@@ -58,7 +58,7 @@ class PortfolioService:
     @staticmethod
     async def create_portfolio(portfolio: Portfolio) -> Portfolio:
         """Create a new portfolio"""
-        logger.info("Creating new portfolio", 
+        logger.debug("Creating new portfolio", 
                    operation="create_portfolio", 
                    portfolio_name=portfolio.name)
         try:
@@ -67,7 +67,7 @@ class PortfolioService:
                 "portfolio",
                 lambda: portfolio.insert()
             )
-            logger.info("Successfully created portfolio", 
+            logger.debug("Successfully created portfolio", 
                        operation="create_portfolio", 
                        portfolio_id=str(portfolio.id),
                        portfolio_name=portfolio.name)
@@ -82,7 +82,7 @@ class PortfolioService:
     @staticmethod
     async def update_portfolio(portfolio: Portfolio) -> Portfolio:
         """Update an existing portfolio"""
-        logger.info("Updating portfolio", 
+        logger.debug("Updating portfolio", 
                    operation="update_portfolio", 
                    portfolio_id=str(portfolio.id),
                    portfolio_name=portfolio.name,
@@ -93,7 +93,7 @@ class PortfolioService:
                 "portfolio",
                 lambda: portfolio.save()
             )
-            logger.info("Successfully updated portfolio", 
+            logger.debug("Successfully updated portfolio", 
                        operation="update_portfolio", 
                        portfolio_id=str(portfolio.id),
                        portfolio_name=portfolio.name,
@@ -109,7 +109,7 @@ class PortfolioService:
     @staticmethod
     async def delete_portfolio(portfolio: Portfolio) -> None:
         """Delete a portfolio"""
-        logger.info("Deleting portfolio", 
+        logger.debug("Deleting portfolio", 
                    operation="delete_portfolio", 
                    portfolio_id=str(portfolio.id),
                    portfolio_name=portfolio.name)
@@ -119,7 +119,7 @@ class PortfolioService:
                 "portfolio",
                 lambda: portfolio.delete()
             )
-            logger.info("Successfully deleted portfolio", 
+            logger.debug("Successfully deleted portfolio", 
                        operation="delete_portfolio", 
                        portfolio_id=str(portfolio.id),
                        portfolio_name=portfolio.name)
@@ -141,7 +141,7 @@ class PortfolioService:
         Search portfolios with pagination for v2 API
         Returns tuple of (portfolios, total_count)
         """
-        logger.info("Searching portfolios", 
+        logger.debug("Searching portfolios", 
                    operation="search_portfolios",
                    name=name,
                    name_like=name_like,
@@ -173,7 +173,7 @@ class PortfolioService:
                 **{"db.query.limit": limit, "db.query.offset": offset}
             )
             
-            logger.info("Successfully searched portfolios", 
+            logger.debug("Successfully searched portfolios", 
                        operation="search_portfolios",
                        total_count=total_count,
                        returned_count=len(portfolios),

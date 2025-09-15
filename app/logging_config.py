@@ -111,7 +111,7 @@ class LoggingMiddleware(BaseHTTPMiddleware):
         user_agent = request.headers.get("user-agent", "")
         
         # Log incoming request
-        self.logger.info(
+        self.logger.debug(
             f"Incoming {method} request to {path}",
             method=method,
             path=path,
@@ -135,7 +135,7 @@ class LoggingMiddleware(BaseHTTPMiddleware):
             bytes_sent = int(content_length) if content_length else 0
             
             # Log successful response
-            self.logger.info(
+            self.logger.debug(
                 f"Completed {method} {path} - {response.status_code}",
                 method=method,
                 path=path,

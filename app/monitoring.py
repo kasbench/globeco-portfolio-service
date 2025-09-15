@@ -115,7 +115,7 @@ def _get_or_create_metric(
             metric = metric_class(name, description, **kwargs)
 
         _METRICS_REGISTRY[registry_key] = metric
-        logger.info(
+        logger.debug(
             "Successfully created and registered metric",
             metric_name=name,
             metric_type=type(metric).__name__,
@@ -258,7 +258,7 @@ def initialize_otel_metrics():
     try:
         # Get the current meter provider to ensure we're using the same one configured for export
         meter_provider = metrics.get_meter_provider()
-        logger.info(
+        logger.debug(
             "Getting meter from current meter provider for custom metrics",
             meter_provider_type=type(meter_provider).__name__,
             meter_name="app.monitoring"
@@ -310,7 +310,7 @@ def initialize_otel_metrics():
             unit="1"
         )
         
-        logger.info(
+        logger.debug(
             "Successfully created OpenTelemetry HTTP and thread metrics",
             meter_provider_type=type(meter_provider).__name__,
             meter_type=type(meter).__name__,
@@ -1721,7 +1721,7 @@ def setup_thread_metrics(
         # Check if collector is already registered to avoid duplicate registration
         try:
             REGISTRY.register(_thread_metrics_collector)
-            logger.info(
+            logger.debug(
                 "Thread metrics collector registered with Prometheus registry",
                 update_interval=update_interval,
                 debug_logging=debug_logging,
@@ -1738,7 +1738,7 @@ def setup_thread_metrics(
                 raise
         
         # Log successful setup
-        logger.info(
+        logger.debug(
             "Thread metrics collection enabled successfully",
             collector_type="ThreadMetricsCollector",
             update_interval=update_interval,
@@ -2306,7 +2306,7 @@ class ThreadMetricsCollector:
             'requests_queued': 0
         }
         
-        logger.info(
+        logger.debug(
             "ThreadMetricsCollector initialized",
             update_interval=self.update_interval,
             throttling_enabled=True,
@@ -2584,7 +2584,7 @@ class ThreadMetricsCollector:
         old_interval = self.update_interval
         self.update_interval = interval
         
-        logger.info(
+        logger.debug(
             "Thread metrics collector update interval changed",
             old_interval=old_interval,
             new_interval=self.update_interval
@@ -2597,7 +2597,7 @@ class ThreadMetricsCollector:
         This method should be used sparingly and primarily for testing
         or when immediate metrics updates are required.
         """
-        logger.info(
+        logger.debug(
             "Forcing immediate thread metrics update",
             bypassing_throttling=True,
             time_since_last_update=time.time() - self.last_update
@@ -2645,7 +2645,7 @@ class EnhancedHTTPMetricsMiddleware(BaseHTTPMiddleware):
         self.debug_logging = debug_logging
         
         # Log middleware initialization with comprehensive details
-        logger.info(
+        logger.debug(
             "EnhancedHTTPMetricsMiddleware initialized successfully",
             debug_logging_enabled=self.debug_logging,
             middleware_version="enhanced",
@@ -2714,7 +2714,7 @@ class EnhancedHTTPMetricsMiddleware(BaseHTTPMiddleware):
             Response with metrics recorded for the request
         """
         # ALWAYS log that middleware is being triggered
-        logger.info(
+        logger.debug(
             "EnhancedHTTPMetricsMiddleware processing request",
             method=getattr(request, 'method', 'UNKNOWN'),
             path=getattr(request.url, 'path', 'unknown') if hasattr(request, 'url') else 'unknown',
@@ -3038,7 +3038,7 @@ class EnhancedHTTPMetricsMiddleware(BaseHTTPMiddleware):
             duration_ms: Request duration in milliseconds
         """
         # ALWAYS log that we're recording metrics (not just debug)
-        logger.info(
+        logger.debug(
             "Recording HTTP metrics to both Prometheus and OpenTelemetry",
             method=method,
             path=path,
@@ -3107,7 +3107,7 @@ class EnhancedHTTPMetricsMiddleware(BaseHTTPMiddleware):
             current_otel_counter = getattr(monitoring_module, 'otel_http_requests_total', None)
             
             # ALWAYS log the current state
-            logger.info(
+            logger.debug(
                 "OpenTelemetry counter metric state check",
                 method=method,
                 path=path,
@@ -3119,7 +3119,7 @@ class EnhancedHTTPMetricsMiddleware(BaseHTTPMiddleware):
             
             if current_otel_counter is not None:
                 current_otel_counter.add(1, attributes=otel_attributes)
-                logger.info(
+                logger.debug(
                     "Successfully recorded OpenTelemetry HTTP requests total counter",
                     method=method,
                     path=path,
@@ -3232,8 +3232,8 @@ class EnhancedHTTPMetricsMiddleware(BaseHTTPMiddleware):
 
 
 # Initialize metrics on module import
-logger.info("Enhanced HTTP metrics monitoring module initialized")
-logger.info(f"Metrics registry contains {len(_METRICS_REGISTRY)} metrics")
+logger.debug("Enhanced HTTP metrics monitoring module initialized")
+logger.debug(f"Metrics registry contains {len(_METRICS_REGISTRY)} metrics")
 
 # Log metric status for debugging
 if logger.logger.isEnabledFor(10):  # DEBUG level

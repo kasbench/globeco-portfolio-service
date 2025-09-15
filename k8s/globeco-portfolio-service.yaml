@@ -30,11 +30,11 @@ spec:
             - name: MONGODB_URI
               value: "mongodb://globeco-portfolio-service-mongodb:27017"
             - name: OTEL_METRICS_LOGGING_ENABLED
-              value: "true"
+              value: "false"
             - name: ENABLE_METRICS
               value: "true"
             - name: METRICS_DEBUG_LOGGING
-              value: "true"
+              value: "false"
             # Thread Metrics Configuration
             - name: ENABLE_THREAD_METRICS
               value: "true"
@@ -77,6 +77,8 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
+            - name: LOG_LEVEL
+              value: "INFO"
           resources:
             requests:
               cpu: "200m"
