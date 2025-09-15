@@ -26,7 +26,7 @@ async def search_portfolios(
     
     Note: Only one of 'name' or 'name_like' can be provided.
     """
-    logger.info("API v2: Search portfolios requested", 
+    loger.debug("API v2: Search portfolios requested", 
                endpoint="/api/v2/portfolios",
                name=name,
                name_like=name_like,
@@ -107,7 +107,7 @@ async def search_portfolios(
             pagination=pagination
         )
         
-        logger.info("API v2: Successfully searched portfolios", 
+        loger.debug("API v2: Successfully searched portfolios", 
                    endpoint="/api/v2/portfolios",
                    total_count=total_count,
                    returned_count=len(portfolio_dtos),
