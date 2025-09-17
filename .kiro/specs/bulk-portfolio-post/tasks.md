@@ -12,7 +12,7 @@
   - Include comprehensive logging for retry attempts and failures
   - _Requirements: 3.1, 3.2, 3.3_
 
-- [ ] 3. Create bulk portfolio creation service method
+- [x] 3. Create bulk portfolio creation service method
   - Implement create_portfolios_bulk static method in PortfolioService class
   - Convert list of PortfolioPostDTO to Portfolio model objects with proper defaults
   - Integrate MongoDB transaction support using Beanie ODM sessions

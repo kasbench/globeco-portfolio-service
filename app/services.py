@@ -1,5 +1,5 @@
 from app.models import Portfolio
-from app.schemas import PortfolioResponseDTO, PaginationDTO, PortfolioSearchResponseDTO
+from app.schemas import PortfolioResponseDTO, PaginationDTO, PortfolioSearchResponseDTO, PortfolioPostDTO
 from app.tracing import trace_database_call
 from app.logging_config import get_logger
 from bson import ObjectId
@@ -13,6 +13,8 @@ from pymongo.errors import (
     WriteError,
     OperationFailure
 )
+from beanie import WriteRules
+from datetime import datetime, UTC
 import re
 import math
 import asyncio
@@ -382,6 +384,122 @@ class PortfolioService:
             hasNext=has_next,
             hasPrevious=has_previous
         )
+    
+    @staticmethod
+    async def create_portfolios_bulk(portfolio_dtos: List[PortfolioPostDTO]) -> List[Portfolio]:
+        """
+        Create multiple portfolios in a single transaction with retry logic.
+        
+        Args:
+            portfolio_dtos: List of PortfolioPostDTO objects to create
+            
+        Returns:
+            List of created Portfolio objects
+            
+        Raises:
+            Exception: If the bulk operation fails after all retries
+        """
+        logger.info(
+            "Starting bulk portfolio creation",
+            operation="create_portfolios_bulk",
+            portfolio_count=len(portfolio_dtos)
+        )
+        
+        # Convert DTOs to Portfolio model objects with proper defaults
+        portfolios = []
+        for dto in portfolio_dtos:
+            portfolio = Portfolio(
+                name=dto.name,
+                dateCreated=dto.dateCreated if dto.dateCreated else datetime.now(UTC),
+                version=dto.version if dto.version is not None else 1
+            )
+            portfolios.append(portfolio)
+        
+        logger.debug(
+            "Converted DTOs to Portfolio objects",
+            operation="create_portfolios_bulk",
+            portfolio_count=len(portfolios),
+            portfolio_names=[p.name for p in portfolios]
+        )
+        
+        # Define the bulk operation with transaction support
+        async def bulk_create_operation():
+            """Execute the bulk creation within a transaction"""
+            logger.debug(
+                "Starting transaction for bulk portfolio creation",
+                operation="bulk_create_operation",
+                portfolio_count=len(portfolios)
+            )
+            
+            # Use Beanie's transaction support
+            async with await Portfolio.get_motor_client().start_session() as session:
+                async with session.start_transaction():
+                    logger.debug(
+                        "Transaction started, inserting portfolios",
+                        operation="bulk_create_operation",
+                        session_id=str(session.session_id)
+                    )
+                    
+                    # Insert all portfolios within the transaction
+                    created_portfolios = []
+                    for i, portfolio in enumerate(portfolios):
+                        try:
+                            await portfolio.insert(session=session)
+                            created_portfolios.append(portfolio)
+                            logger.debug(
+                                "Portfolio inserted in transaction",
+                                operation="bulk_create_operation",
+                                portfolio_index=i,
+                                portfolio_name=portfolio.name,
+                                portfolio_id=str(portfolio.id)
+                            )
+                        except Exception as e:
+                            logger.error(
+                                "Failed to insert portfolio in transaction",
+                                operation="bulk_create_operation",
+                                portfolio_index=i,
+                                portfolio_name=portfolio.name,
+                                error=str(e),
+                                error_type=type(e).__name__
+                            )
+                            # Re-raise to trigger transaction rollback
+                            raise
+                    
+                    logger.info(
+                        "All portfolios inserted successfully in transaction",
+                        operation="bulk_create_operation",
+                        portfolio_count=len(created_portfolios),
+                        session_id=str(session.session_id)
+                    )
+                    
+                    return created_portfolios
+        
+        # Execute the bulk operation with retry logic
+        try:
+            result = await PortfolioService._execute_with_retry(
+                operation=bulk_create_operation,
+                max_retries=3,
+                operation_name="bulk_portfolio_creation"
+            )
+            
+            logger.info(
+                "Bulk portfolio creation completed successfully",
+                operation="create_portfolios_bulk",
+                portfolio_count=len(result),
+                created_portfolio_ids=[str(p.id) for p in result]
+            )
+            
+            return result
+            
+        except Exception as e:
+            logger.error(
+                "Bulk portfolio creation failed after all retries",
+                operation="create_portfolios_bulk",
+                portfolio_count=len(portfolio_dtos),
+                error=str(e),
+                error_type=type(e).__name__
+            )
+            raise
     
     @staticmethod
     def portfolio_to_dto(portfolio: Portfolio) -> PortfolioResponseDTO:
