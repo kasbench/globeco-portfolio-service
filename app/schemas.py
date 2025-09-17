@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 
 class PortfolioResponseDTO(BaseModel):
@@ -30,4 +30,9 @@ class PaginationDTO(BaseModel):
 
 class PortfolioSearchResponseDTO(BaseModel):
     portfolios: List[PortfolioResponseDTO] = Field(...)
-    pagination: PaginationDTO = Field(...) 
+    pagination: PaginationDTO = Field(...)
+
+# Bulk validation error schema for detailed error reporting
+class BulkValidationError(BaseModel):
+    message: str = Field(..., description="Overall error message for the bulk operation")
+    errors: List[Dict[str, Any]] = Field(..., description="Per-portfolio validation errors with details") 
