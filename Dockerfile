@@ -32,11 +32,5 @@ EXPOSE 8000
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
 
-# Start the FastAPI app with Uvicorn
-# CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"] 
-# CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"] 
-CMD ["gunicorn", "app.main:app", 
-     "-k", "uvicorn.workers.UvicornWorker", 
-     "-b", "0.0.0.0:8000", 
-     "--workers", "4", 
-     "--threads", "1"]
+# Start the FastAPI app with Gunicorn + Uvicorn workers
+CMD ["gunicorn", "app.main:app", "-k", "uvicorn.workers.UvicornWorker", "-b", "0.0.0.0:8000", "--workers", "4", "--threads", "1"]
