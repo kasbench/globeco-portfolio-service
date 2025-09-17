@@ -386,6 +386,108 @@ class PortfolioService:
         )
     
     @staticmethod
+    def _validate_bulk_request(portfolio_dtos: List[PortfolioPostDTO]) -> None:
+        """
+        Validate bulk request constraints including list size limits.
+        
+        Args:
+            portfolio_dtos: List of PortfolioPostDTO objects to validate
+            
+        Raises:
+            ValueError: If validation fails with descriptive error message
+        """
+        # Check for empty request
+        if not portfolio_dtos or len(portfolio_dtos) == 0:
+            logger.warning(
+                "Bulk request validation failed: empty request",
+                operation="_validate_bulk_request",
+                portfolio_count=0
+            )
+            raise ValueError("Request must contain at least 1 portfolio")
+        
+        # Check for oversized request
+        if len(portfolio_dtos) > 100:
+            logger.warning(
+                "Bulk request validation failed: oversized request",
+                operation="_validate_bulk_request",
+                portfolio_count=len(portfolio_dtos),
+                max_allowed=100
+            )
+            raise ValueError("Request cannot contain more than 100 portfolios")
+        
+        logger.debug(
+            "Bulk request size validation passed",
+            operation="_validate_bulk_request",
+            portfolio_count=len(portfolio_dtos)
+        )
+    
+    @staticmethod
+    def _check_duplicate_names(portfolio_dtos: List[PortfolioPostDTO]) -> None:
+        """
+        Check for duplicate portfolio names within the batch.
+        
+        Args:
+            portfolio_dtos: List of PortfolioPostDTO objects to check
+            
+        Raises:
+            ValueError: If duplicate names are found with details
+        """
+        # Track names (case-insensitive) and their positions
+        name_positions = {}
+        duplicates = []
+        
+        for i, dto in enumerate(portfolio_dtos):
+            # Normalize name for comparison (strip whitespace, lowercase)
+            normalized_name = dto.name.strip().lower()
+            
+            if normalized_name in name_positions:
+                # Found duplicate
+                original_position = name_positions[normalized_name]
+                duplicate_info = {
+                    "name": dto.name,
+                    "positions": [original_position, i],
+                    "normalized_name": normalized_name
+                }
+                
+                # Check if we already recorded this duplicate
+                existing_duplicate = next(
+                    (d for d in duplicates if d["normalized_name"] == normalized_name), 
+                    None
+                )
+                
+                if existing_duplicate:
+                    # Add this position to existing duplicate record
+                    existing_duplicate["positions"].append(i)
+                else:
+                    # New duplicate found
+                    duplicates.append(duplicate_info)
+            else:
+                # First occurrence of this name
+                name_positions[normalized_name] = i
+        
+        if duplicates:
+            # Create detailed error message
+            duplicate_names = [d["name"] for d in duplicates]
+            error_msg = f"Duplicate portfolio names found in request: {', '.join(duplicate_names)}"
+            
+            logger.warning(
+                "Bulk request validation failed: duplicate names",
+                operation="_check_duplicate_names",
+                duplicate_count=len(duplicates),
+                duplicate_names=duplicate_names,
+                duplicate_details=duplicates
+            )
+            
+            raise ValueError(error_msg)
+        
+        logger.debug(
+            "Duplicate name validation passed",
+            operation="_check_duplicate_names",
+            portfolio_count=len(portfolio_dtos),
+            unique_names=len(name_positions)
+        )
+    
+    @staticmethod
     async def create_portfolios_bulk(portfolio_dtos: List[PortfolioPostDTO]) -> List[Portfolio]:
         """
         Create multiple portfolios in a single transaction with retry logic.
@@ -397,13 +499,20 @@ class PortfolioService:
             List of created Portfolio objects
             
         Raises:
+            ValueError: If validation fails (empty request, oversized request, duplicates)
             Exception: If the bulk operation fails after all retries
         """
         logger.info(
             "Starting bulk portfolio creation",
             operation="create_portfolios_bulk",
-            portfolio_count=len(portfolio_dtos)
+            portfolio_count=len(portfolio_dtos) if portfolio_dtos else 0
         )
+        
+        # Validate bulk request constraints
+        PortfolioService._validate_bulk_request(portfolio_dtos)
+        
+        # Check for duplicate names within the batch
+        PortfolioService._check_duplicate_names(portfolio_dtos)
         
         # Convert DTOs to Portfolio model objects with proper defaults
         portfolios = []

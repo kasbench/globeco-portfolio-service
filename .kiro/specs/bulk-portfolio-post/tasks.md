@@ -20,7 +20,7 @@
   - Use the retry logic utility for database operations
   - _Requirements: 1.1, 2.1, 2.2, 3.1_
 
-- [ ] 4. Add input validation helper methods
+- [x] 4. Add input validation helper methods
   - Create _validate_bulk_request helper method to check list size constraints (1-100 portfolios)
   - Create _check_duplicate_names helper method to detect duplicate portfolio names within the batch
   - Add validation for empty requests and oversized requests
