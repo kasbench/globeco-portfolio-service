@@ -5,7 +5,7 @@
   - Include fields for overall message and per-portfolio error details
   - _Requirements: 4.1, 4.2_
 
-- [ ] 2. Implement retry logic utility in services layer
+- [x] 2. Implement retry logic utility in services layer
   - Create _execute_with_retry static method in PortfolioService class
   - Implement exponential backoff with delays of 1s, 2s, 4s for up to 3 retry attempts
   - Add logic to distinguish between recoverable and non-recoverable database errors

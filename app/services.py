@@ -3,14 +3,187 @@ from app.schemas import PortfolioResponseDTO, PaginationDTO, PortfolioSearchResp
 from app.tracing import trace_database_call
 from app.logging_config import get_logger
 from bson import ObjectId
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Any, Callable
+from pymongo.errors import (
+    ConnectionFailure, 
+    ServerSelectionTimeoutError, 
+    NetworkTimeout, 
+    AutoReconnect,
+    DuplicateKeyError,
+    WriteError,
+    OperationFailure
+)
 import re
 import math
+import asyncio
 
 logger = get_logger(__name__)
 
 
 class PortfolioService:
+    
+    @staticmethod
+    async def _execute_with_retry(
+        operation: Callable[[], Any], 
+        max_retries: int = 3,
+        operation_name: str = "database_operation"
+    ) -> Any:
+        """
+        Execute a database operation with exponential backoff retry logic.
+        
+        Args:
+            operation: Async callable to execute
+            max_retries: Maximum number of retry attempts (default: 3)
+            operation_name: Name of the operation for logging purposes
+            
+        Returns:
+            Result of the operation
+            
+        Raises:
+            The last exception encountered if all retries are exhausted
+        """
+        # Exponential backoff delays: 1s, 2s, 4s
+        delays = [1, 2, 4]
+        last_exception = None
+        
+        for attempt in range(max_retries + 1):  # +1 for initial attempt
+            try:
+                logger.debug(
+                    "Executing database operation",
+                    operation=operation_name,
+                    attempt=attempt + 1,
+                    max_attempts=max_retries + 1
+                )
+                
+                result = await operation()
+                
+                if attempt > 0:  # Log successful retry
+                    logger.info(
+                        "Database operation succeeded after retry",
+                        operation=operation_name,
+                        attempt=attempt + 1,
+                        total_attempts=attempt + 1
+                    )
+                
+                return result
+                
+            except Exception as e:
+                last_exception = e
+                
+                # Check if this is a recoverable error
+                is_recoverable = PortfolioService._is_recoverable_error(e)
+                
+                logger.warning(
+                    "Database operation failed",
+                    operation=operation_name,
+                    attempt=attempt + 1,
+                    max_attempts=max_retries + 1,
+                    error=str(e),
+                    error_type=type(e).__name__,
+                    is_recoverable=is_recoverable
+                )
+                
+                # If not recoverable or we've exhausted retries, raise the exception
+                if not is_recoverable or attempt >= max_retries:
+                    if not is_recoverable:
+                        logger.error(
+                            "Database operation failed with non-recoverable error",
+                            operation=operation_name,
+                            error=str(e),
+                            error_type=type(e).__name__
+                        )
+                    else:
+                        logger.error(
+                            "Database operation failed after all retry attempts",
+                            operation=operation_name,
+                            total_attempts=attempt + 1,
+                            error=str(e),
+                            error_type=type(e).__name__
+                        )
+                    raise e
+                
+                # Wait before retrying (exponential backoff)
+                if attempt < max_retries:
+                    delay = delays[min(attempt, len(delays) - 1)]
+                    logger.info(
+                        "Retrying database operation after delay",
+                        operation=operation_name,
+                        attempt=attempt + 1,
+                        next_attempt=attempt + 2,
+                        delay_seconds=delay
+                    )
+                    await asyncio.sleep(delay)
+        
+        # This should never be reached, but just in case
+        if last_exception:
+            raise last_exception
+        else:
+            raise RuntimeError(f"Operation {operation_name} failed without exception")
+    
+    @staticmethod
+    def _is_recoverable_error(error: Exception) -> bool:
+        """
+        Determine if a database error is recoverable and should be retried.
+        
+        Args:
+            error: The exception to check
+            
+        Returns:
+            True if the error is recoverable, False otherwise
+        """
+        # Recoverable errors - typically transient network/connection issues
+        recoverable_errors = (
+            ConnectionFailure,
+            ServerSelectionTimeoutError,
+            NetworkTimeout,
+            AutoReconnect,
+        )
+        
+        # Non-recoverable errors - typically application/data issues
+        non_recoverable_errors = (
+            DuplicateKeyError,
+            WriteError,
+        )
+        
+        # Check for specific recoverable errors
+        if isinstance(error, recoverable_errors):
+            return True
+            
+        # Check for specific non-recoverable errors
+        if isinstance(error, non_recoverable_errors):
+            return False
+            
+        # Handle OperationFailure - check error code for specific cases
+        if isinstance(error, OperationFailure):
+            # Common non-recoverable error codes
+            non_recoverable_codes = {
+                11000,  # DuplicateKey
+                11001,  # DuplicateKey (legacy)
+                16500,  # BadValue
+                2,      # BadValue
+                14,     # TypeMismatch
+                9,      # FailedToParse
+                40,     # ConflictingUpdateOperators
+                16837,  # InvalidOptions
+                13,     # Unauthorized
+                18,     # AuthenticationFailed
+            }
+            
+            if hasattr(error, 'code') and error.code in non_recoverable_codes:
+                return False
+                
+            # Timeout-related operation failures are recoverable
+            timeout_codes = {
+                50,     # ExceededTimeLimit
+                216,    # ExceededMemoryLimit
+            }
+            
+            if hasattr(error, 'code') and error.code in timeout_codes:
+                return True
+        
+        # For unknown errors, default to non-recoverable to avoid infinite retries
+        # This is a conservative approach - better to fail fast than retry indefinitely
+        return False
     
     @staticmethod
     async def get_all_portfolios() -> List[Portfolio]:
