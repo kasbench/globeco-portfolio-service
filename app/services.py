@@ -11,7 +11,8 @@ from pymongo.errors import (
     AutoReconnect,
     DuplicateKeyError,
     WriteError,
-    OperationFailure
+    OperationFailure,
+    BulkWriteError
 )
 from beanie import WriteRules
 from datetime import datetime, UTC
@@ -145,6 +146,7 @@ class PortfolioService:
         non_recoverable_errors = (
             DuplicateKeyError,
             WriteError,
+            BulkWriteError,
         )
         
         # Check for specific recoverable errors
@@ -502,28 +504,12 @@ class PortfolioService:
             ValueError: If validation fails (empty request, oversized request, duplicates)
             Exception: If the bulk operation fails after all retries
         """
+        # Minimal logging for performance
         logger.info(
             "Starting bulk portfolio creation",
             operation="create_portfolios_bulk",
             portfolio_count=len(portfolio_dtos) if portfolio_dtos else 0
         )
-        
-        # Log the request details for debugging
-        if portfolio_dtos:
-            request_summary = []
-            for i, dto in enumerate(portfolio_dtos):
-                request_summary.append({
-                    "index": i,
-                    "name": dto.name,
-                    "dateCreated": dto.dateCreated.isoformat() if dto.dateCreated else None,
-                    "version": dto.version
-                })
-            
-            logger.info(
-                "Bulk portfolio creation request details",
-                operation="create_portfolios_bulk",
-                request_summary=request_summary
-            )
         
         # Validate bulk request constraints
         PortfolioService._validate_bulk_request(portfolio_dtos)
@@ -541,63 +527,22 @@ class PortfolioService:
             )
             portfolios.append(portfolio)
         
-        logger.debug(
-            "Converted DTOs to Portfolio objects",
-            operation="create_portfolios_bulk",
-            portfolio_count=len(portfolios),
-            portfolio_names=[p.name for p in portfolios]
-        )
-        
-        # Define the bulk operation - simplified without transactions for now
+        # Define the optimized bulk operation
         async def bulk_create_operation():
-            """Execute the bulk creation"""
-            logger.debug(
-                "Starting bulk portfolio creation",
-                operation="bulk_create_operation",
-                portfolio_count=len(portfolios)
-            )
-            
+            """Execute the bulk creation using MongoDB's insert_many"""
             try:
-                # Insert all portfolios sequentially
-                created_portfolios = []
-                for i, portfolio in enumerate(portfolios):
-                    try:
-                        logger.debug(
-                            "Inserting portfolio",
-                            operation="bulk_create_operation",
-                            portfolio_index=i,
-                            portfolio_name=portfolio.name
-                        )
-                        
-                        await portfolio.insert()
-                        created_portfolios.append(portfolio)
-                        
-                        logger.debug(
-                            "Portfolio inserted successfully",
-                            operation="bulk_create_operation",
-                            portfolio_index=i,
-                            portfolio_name=portfolio.name,
-                            portfolio_id=str(portfolio.id)
-                        )
-                    except Exception as e:
-                        logger.error(
-                            "Failed to insert portfolio",
-                            operation="bulk_create_operation",
-                            portfolio_index=i,
-                            portfolio_name=portfolio.name,
-                            error=str(e),
-                            error_type=type(e).__name__
-                        )
-                        # Re-raise to trigger retry logic
-                        raise
+                # Use Beanie's insert_many for true bulk operation
+                insert_result = await Portfolio.insert_many(portfolios)
                 
+                # insert_many modifies the original portfolio objects with their new IDs
                 logger.info(
-                    "All portfolios inserted successfully",
+                    "Bulk operation completed",
                     operation="bulk_create_operation",
-                    portfolio_count=len(created_portfolios)
+                    portfolio_count=len(portfolios),
+                    inserted_count=len(insert_result.inserted_ids)
                 )
                 
-                return created_portfolios
+                return portfolios
                         
             except Exception as e:
                 logger.error(
@@ -608,26 +553,25 @@ class PortfolioService:
                 )
                 raise
         
-        # Execute the bulk operation with retry logic
+        # Execute the bulk operation with minimal retry logic for performance
         try:
             result = await PortfolioService._execute_with_retry(
                 operation=bulk_create_operation,
-                max_retries=3,
+                max_retries=1,  # Reduced retries for performance
                 operation_name="bulk_portfolio_creation"
             )
             
             logger.info(
                 "Bulk portfolio creation completed successfully",
                 operation="create_portfolios_bulk",
-                portfolio_count=len(result),
-                created_portfolio_ids=[str(p.id) for p in result]
+                portfolio_count=len(result)
             )
             
             return result
             
         except Exception as e:
             logger.error(
-                "Bulk portfolio creation failed after all retries",
+                "Bulk portfolio creation failed",
                 operation="create_portfolios_bulk",
                 portfolio_count=len(portfolio_dtos),
                 error=str(e),
