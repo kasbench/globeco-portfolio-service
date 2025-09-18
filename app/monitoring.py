@@ -13,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, Optional, Callable, List
 
 from fastapi import Request, Response
-from prometheus_client import Counter, Gauge, Histogram
+# Prometheus client removed - using OpenTelemetry only
 from starlette.middleware.base import BaseHTTPMiddleware
 from app.logging_config import get_logger
 
@@ -23,220 +23,14 @@ from opentelemetry.metrics import Counter as OTelCounter, Histogram as OTelHisto
 
 logger = get_logger(__name__)
 
-# Global metrics registry to prevent duplicate registration
-_METRICS_REGISTRY: Dict[str, Any] = {}
+# Prometheus registry removed - using OpenTelemetry only
 
 
-class DummyMetric:
-    """
-    Dummy metric class for graceful fallback when registration fails.
-    
-    This class provides the same interface as Prometheus metrics but performs
-    no actual operations, preventing service disruption when metric registration
-    encounters errors.
-    """
-    
-    def labels(self, **kwargs):
-        """Return self to support method chaining."""
-        return self
-    
-    def inc(self, amount: float = 1) -> None:
-        """Dummy increment operation."""
-        pass
-    
-    def observe(self, amount: float) -> None:
-        """Dummy observe operation."""
-        pass
-    
-    def set(self, value: float) -> None:
-        """Dummy set operation."""
-        pass
-    
-    def collect(self):
-        """Return empty list for Prometheus collection."""
-        return []
+# Prometheus metric creation functions removed - using OpenTelemetry only
 
 
-def _get_or_create_metric(
-    metric_class, 
-    name: str, 
-    description: str, 
-    labels: Optional[list] = None, 
-    registry_key: Optional[str] = None, 
-    **kwargs
-) -> Any:
-    """
-    Get or create a metric, preventing duplicate registration.
-    
-    This function implements a global registry pattern to prevent duplicate
-    metric registration errors that can occur during module reloads or
-    circular imports.
-    
-    Args:
-        metric_class: Prometheus metric class (Counter, Histogram, Gauge)
-        name: Metric name
-        description: Metric description
-        labels: List of label names
-        registry_key: Optional custom registry key (defaults to name)
-        **kwargs: Additional arguments for metric creation
-        
-    Returns:
-        Prometheus metric instance or DummyMetric on failure
-    """
-    if registry_key is None:
-        registry_key = name
-
-    # Check if metric already exists in our registry
-    if registry_key in _METRICS_REGISTRY:
-        logger.debug(
-            "Reusing existing metric from registry",
-            metric_name=name,
-            registry_key=registry_key,
-            metric_type=type(_METRICS_REGISTRY[registry_key]).__name__
-        )
-        return _METRICS_REGISTRY[registry_key]
-
-    try:
-        # Log metric creation attempt
-        logger.debug(
-            "Attempting to create new metric",
-            metric_name=name,
-            metric_class=metric_class.__name__ if hasattr(metric_class, '__name__') else str(metric_class),
-            description=description,
-            labels=labels,
-            registry_key=registry_key,
-            additional_kwargs=list(kwargs.keys()) if kwargs else []
-        )
-        
-        # Create metric with or without labels
-        if labels:
-            metric = metric_class(name, description, labels, **kwargs)
-        else:
-            metric = metric_class(name, description, **kwargs)
-
-        _METRICS_REGISTRY[registry_key] = metric
-        logger.debug(
-            "Successfully created and registered metric",
-            metric_name=name,
-            metric_type=type(metric).__name__,
-            registry_key=registry_key,
-            has_labels=bool(labels),
-            label_count=len(labels) if labels else 0,
-            registry_size=len(_METRICS_REGISTRY)
-        )
-        return metric
-
-    except ValueError as e:
-        if "Duplicated timeseries" in str(e):
-            logger.warning(
-                "Metric already registered in Prometheus registry but not in our internal registry",
-                metric_name=name,
-                registry_key=registry_key,
-                error=str(e),
-                error_type=type(e).__name__,
-                prometheus_registry_conflict=True
-            )
-            # Create dummy metric to prevent service disruption
-            dummy = DummyMetric()
-            _METRICS_REGISTRY[registry_key] = dummy
-            logger.warning(
-                "Created dummy metric to prevent service disruption",
-                metric_name=name,
-                registry_key=registry_key,
-                fallback_type="DummyMetric",
-                reason="prometheus_registry_conflict"
-            )
-            return dummy
-        else:
-            logger.error(
-                "ValueError during metric creation - using dummy metric fallback",
-                metric_name=name,
-                registry_key=registry_key,
-                error=str(e),
-                error_type=type(e).__name__,
-                metric_class=metric_class.__name__ if hasattr(metric_class, '__name__') else str(metric_class),
-                exc_info=True
-            )
-            # Create dummy metric as fallback
-            dummy = DummyMetric()
-            _METRICS_REGISTRY[registry_key] = dummy
-            logger.error(
-                "Created dummy metric due to ValueError",
-                metric_name=name,
-                registry_key=registry_key,
-                fallback_type="DummyMetric",
-                reason="value_error"
-            )
-            return dummy
-    except Exception as e:
-        logger.error(
-            "Unexpected error during metric creation - using dummy metric fallback",
-            metric_name=name,
-            registry_key=registry_key,
-            error=str(e),
-            error_type=type(e).__name__,
-            metric_class=metric_class.__name__ if hasattr(metric_class, '__name__') else str(metric_class),
-            exc_info=True
-        )
-        # Create dummy metric as fallback
-        dummy = DummyMetric()
-        _METRICS_REGISTRY[registry_key] = dummy
-        logger.error(
-            "Created dummy metric due to unexpected error",
-            metric_name=name,
-            registry_key=registry_key,
-            fallback_type="DummyMetric",
-            reason="unexpected_error"
-        )
-        return dummy
-
-
-# Create the three standardized HTTP metrics (Prometheus - for /metrics endpoint)
-HTTP_REQUESTS_TOTAL = _get_or_create_metric(
-    Counter,
-    'http_requests_total',
-    'Total number of HTTP requests',
-    ['method', 'path', 'status'],
-)
-
-HTTP_REQUEST_DURATION = _get_or_create_metric(
-    Histogram,
-    'http_request_duration',
-    'HTTP request duration in milliseconds',
-    ['method', 'path', 'status'],
-    buckets=[5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000],
-)
-
-HTTP_REQUESTS_IN_FLIGHT = _get_or_create_metric(
-    Gauge,
-    'http_requests_in_flight',
-    'Number of HTTP requests currently being processed'
-)
-
-# Create the four thread worker metrics (Prometheus - for /metrics endpoint)
-HTTP_WORKERS_ACTIVE = _get_or_create_metric(
-    Gauge,
-    'http_workers_active',
-    'Number of threads currently executing requests or performing work'
-)
-
-HTTP_WORKERS_TOTAL = _get_or_create_metric(
-    Gauge,
-    'http_workers_total',
-    'Total number of threads currently alive in the thread pool'
-)
-
-HTTP_WORKERS_MAX_CONFIGURED = _get_or_create_metric(
-    Gauge,
-    'http_workers_max_configured',
-    'Maximum number of threads that can be created in the thread pool'
-)
-
-HTTP_REQUESTS_QUEUED = _get_or_create_metric(
-    Gauge,
-    'http_requests_queued',
-    'Number of pending requests waiting in the queue for thread assignment'
-)
+# Prometheus metrics removed - using OpenTelemetry only
+# All HTTP and thread metrics are now handled via OpenTelemetry OTLP export
 
 # OpenTelemetry metrics - initialized later after meter provider is set up
 otel_http_requests_total = None
@@ -1116,12 +910,8 @@ def _estimate_queue_from_metrics() -> Optional[int]:
     try:
         # Get current metrics values
         try:
-            # Try to get current in-flight requests
+            # Prometheus in-flight requests access removed - using OpenTelemetry only
             in_flight_value = 0
-            if hasattr(HTTP_REQUESTS_IN_FLIGHT, '_value') and hasattr(HTTP_REQUESTS_IN_FLIGHT._value, '_value'):
-                in_flight_value = HTTP_REQUESTS_IN_FLIGHT._value._value
-            elif hasattr(HTTP_REQUESTS_IN_FLIGHT, 'get'):
-                in_flight_value = HTTP_REQUESTS_IN_FLIGHT.get()
             
             logger.debug(
                 "Retrieved in-flight requests metric for queue estimation",
@@ -1365,11 +1155,8 @@ def _estimate_queue_from_metrics() -> Optional[int]:
         # Try to get current requests in flight
         requests_in_flight = 0
         try:
-            # Access the Prometheus gauge value
-            if hasattr(HTTP_REQUESTS_IN_FLIGHT, '_value'):
-                requests_in_flight = HTTP_REQUESTS_IN_FLIGHT._value._value
-            elif hasattr(HTTP_REQUESTS_IN_FLIGHT, 'get'):
-                requests_in_flight = HTTP_REQUESTS_IN_FLIGHT.get()
+            # Prometheus gauge access removed - using OpenTelemetry only
+            requests_in_flight = 0
         except Exception as e:
             try:
                 logger.debug(
@@ -1625,55 +1412,13 @@ def _get_asyncio_thread_pool_info() -> Dict[str, Any]:
         return {}
 
 
-def get_metrics_registry() -> Dict[str, Any]:
-    """
-    Get the current metrics registry for testing and debugging.
-    
-    Returns:
-        Dictionary containing all registered metrics
-    """
-    return _METRICS_REGISTRY.copy()
+# Prometheus registry functions removed - using OpenTelemetry only
 
 
-def clear_metrics_registry() -> None:
-    """
-    Clear the metrics registry for testing purposes.
-    
-    Warning: This should only be used in tests to reset state.
-    """
-    global _METRICS_REGISTRY
-    _METRICS_REGISTRY.clear()
-    logger.debug("Metrics registry cleared")
+# Prometheus dummy metric function removed - using OpenTelemetry only
 
 
-def is_dummy_metric(metric: Any) -> bool:
-    """
-    Check if a metric is a dummy metric.
-    
-    Args:
-        metric: Metric instance to check
-        
-    Returns:
-        True if metric is a DummyMetric instance
-    """
-    return isinstance(metric, DummyMetric)
-
-
-def get_metric_status() -> Dict[str, Dict[str, Any]]:
-    """
-    Get status information about all registered metrics.
-    
-    Returns:
-        Dictionary with metric names and their status information
-    """
-    status = {}
-    for name, metric in _METRICS_REGISTRY.items():
-        status[name] = {
-            'type': type(metric).__name__,
-            'is_dummy': is_dummy_metric(metric),
-            'class_module': type(metric).__module__
-        }
-    return status
+# Prometheus metric status function removed - using OpenTelemetry only
 
 
 # Global thread metrics collector instance
@@ -1715,27 +1460,13 @@ def setup_thread_metrics(
         # Create the thread metrics collector
         _thread_metrics_collector = ThreadMetricsCollector(update_interval=update_interval)
         
-        # Register collector with Prometheus registry to trigger updates on scrape
-        from prometheus_client import REGISTRY
-        
-        # Check if collector is already registered to avoid duplicate registration
-        try:
-            REGISTRY.register(_thread_metrics_collector)
-            logger.debug(
-                "Thread metrics collector registered with Prometheus registry",
-                update_interval=update_interval,
-                debug_logging=debug_logging,
-                registration_successful=True
-            )
-        except ValueError as e:
-            if "Duplicated timeseries" in str(e) or "already registered" in str(e).lower():
-                logger.warning(
-                    "Thread metrics collector already registered - continuing with existing registration",
-                    error=str(e),
-                    registration_status="already_registered"
-                )
-            else:
-                raise
+        # Prometheus registry registration removed - using OpenTelemetry only
+        logger.debug(
+            "Thread metrics collector created (OpenTelemetry only)",
+            update_interval=update_interval,
+            debug_logging=debug_logging,
+            prometheus_removed=True
+        )
         
         # Log successful setup
         logger.debug(
@@ -2395,28 +2126,12 @@ class ThreadMetricsCollector:
                 max_configured_workers=max_configured
             )
             
-            # Update Prometheus metrics (for /metrics endpoint)
-            try:
-                HTTP_WORKERS_ACTIVE.set(active_count)
-                HTTP_WORKERS_TOTAL.set(total_count)
-                HTTP_WORKERS_MAX_CONFIGURED.set(max_configured)
-                
-                logger.debug(
-                    "Updated Prometheus worker metrics",
-                    active_workers=active_count,
-                    total_workers=total_count,
-                    max_configured_workers=max_configured
-                )
-                
-            except Exception as e:
-                logger.error(
-                    "Failed to update Prometheus worker metrics",
-                    error=str(e),
-                    error_type=type(e).__name__,
-                    active_count=active_count,
-                    total_count=total_count,
-                    max_configured=max_configured,
-                    exc_info=True
+            # Prometheus metrics removed - using OpenTelemetry only
+            logger.debug(
+                "Prometheus worker metrics removed - using OpenTelemetry only",
+                active_workers=active_count,
+                total_workers=total_count,
+                max_configured_workers=max_configured
                 )
             
             # Update OpenTelemetry metrics (for collector export)
@@ -2494,23 +2209,11 @@ class ThreadMetricsCollector:
                 queued_requests=queued_count
             )
             
-            # Update Prometheus metrics (for /metrics endpoint)
-            try:
-                HTTP_REQUESTS_QUEUED.set(queued_count)
-                
-                logger.debug(
-                    "Updated Prometheus queue metrics",
-                    queued_requests=queued_count
-                )
-                
-            except Exception as e:
-                logger.error(
-                    "Failed to update Prometheus queue metrics",
-                    error=str(e),
-                    error_type=type(e).__name__,
-                    queued_count=queued_count,
-                    exc_info=True
-                )
+            # Prometheus queue metrics removed - using OpenTelemetry only
+            logger.debug(
+                "Prometheus queue metrics removed - using OpenTelemetry only",
+                queued_requests=queued_count
+            )
             
             # Update OpenTelemetry metrics (for collector export)
             try:
@@ -2664,30 +2367,12 @@ class EnhancedHTTPMetricsMiddleware(BaseHTTPMiddleware):
             
         # Validate that metrics are available
         try:
-            # Test that metrics are accessible
-            if is_dummy_metric(HTTP_REQUESTS_TOTAL):
-                logger.warning(
-                    "HTTP requests total counter is using dummy metric - metrics may not be recorded",
-                    metric_name="http_requests_total",
-                    metric_type="DummyMetric",
-                    impact="counter_metrics_disabled"
-                )
-            
-            if is_dummy_metric(HTTP_REQUEST_DURATION):
-                logger.warning(
-                    "HTTP request duration histogram is using dummy metric - duration metrics may not be recorded",
-                    metric_name="http_request_duration",
-                    metric_type="DummyMetric",
-                    impact="duration_metrics_disabled"
-                )
-                
-            if is_dummy_metric(HTTP_REQUESTS_IN_FLIGHT):
-                logger.warning(
-                    "HTTP requests in-flight gauge is using dummy metric - in-flight metrics may not be recorded",
-                    metric_name="http_requests_in_flight",
-                    metric_type="DummyMetric",
-                    impact="in_flight_metrics_disabled"
-                )
+            # Prometheus metric validation removed - using OpenTelemetry only
+            logger.debug(
+                "HTTP metrics middleware initialized with OpenTelemetry only",
+                prometheus_removed=True,
+                opentelemetry_enabled=True
+            )
                 
         except Exception as e:
             logger.error(
@@ -2755,27 +2440,14 @@ class EnhancedHTTPMetricsMiddleware(BaseHTTPMiddleware):
         in_flight_incremented = False
         otel_in_flight_incremented = False
         
-        # Increment Prometheus in-flight gauge
-        try:
-            HTTP_REQUESTS_IN_FLIGHT.inc()
-            in_flight_incremented = True
-            if self.debug_logging:
-                logger.debug(
-                    "Successfully incremented Prometheus in-flight requests gauge",
-                    method=request_method,
-                    path=request_path,
-                    gauge_operation="increment"
-                )
-        except Exception as e:
-            logger.error(
-                "Failed to increment Prometheus in-flight requests gauge - continuing request processing",
-                error=str(e),
-                error_type=type(e).__name__,
+        # Prometheus in-flight gauge removed - using OpenTelemetry only
+        in_flight_incremented = False
+        if self.debug_logging:
+            logger.debug(
+                "Prometheus in-flight gauge removed - using OpenTelemetry only",
                 method=request_method,
                 path=request_path,
-                gauge_operation="increment",
-                impact="in_flight_prometheus_metrics_disabled",
-                exc_info=True,
+                prometheus_removed=True
             )
         
         # Increment OpenTelemetry in-flight gauge
@@ -2943,28 +2615,14 @@ class EnhancedHTTPMetricsMiddleware(BaseHTTPMiddleware):
         finally:
             # Always decrement in-flight requests gauge
             # Only decrement if we successfully incremented to avoid negative values
-            if in_flight_incremented:
-                try:
-                    HTTP_REQUESTS_IN_FLIGHT.dec()
-                    if self.debug_logging:
-                        logger.debug(
-                            "Successfully decremented Prometheus in-flight requests gauge",
-                            method=request_method,
-                            path=request_path,
-                            gauge_operation="decrement"
-                        )
-                except Exception as e:
-                    logger.error(
-                        "Critical error decrementing Prometheus in-flight requests gauge - gauge may be inaccurate",
-                        error=str(e),
-                        error_type=type(e).__name__,
-                        method=request_method,
-                        path=request_path,
-                        gauge_operation="decrement",
-                        impact="prometheus_gauge_accuracy_compromised",
-                        mitigation="gauge_will_self_correct_over_time",
-                        exc_info=True,
-                    )
+            # Prometheus in-flight gauge decrement removed - using OpenTelemetry only
+            if self.debug_logging:
+                logger.debug(
+                    "Prometheus in-flight gauge decrement removed - using OpenTelemetry only",
+                    method=request_method,
+                    path=request_path,
+                    prometheus_removed=True
+                )
             else:
                 if self.debug_logging:
                     logger.debug(
@@ -3056,48 +2714,25 @@ class EnhancedHTTPMetricsMiddleware(BaseHTTPMiddleware):
             # Remove service_name as it should come from resource attributes
         }
 
-        # Record Prometheus counter metrics with error handling
-        try:
-            HTTP_REQUESTS_TOTAL.labels(method=method, path=path, status=status).inc()
-            if self.debug_logging:
-                logger.debug(
-                    "Successfully recorded Prometheus HTTP requests total counter",
-                    method=method,
-                    path=path,
-                    status=status,
-                )
-        except Exception as e:
-            logger.error(
-                "Failed to record Prometheus HTTP requests total counter",
-                error=str(e),
-                error_type=type(e).__name__,
+        # Prometheus counter metrics removed - using OpenTelemetry only
+        if self.debug_logging:
+            logger.debug(
+                "Prometheus HTTP requests counter removed - using OpenTelemetry only",
                 method=method,
                 path=path,
                 status=status,
-                exc_info=True,
+                prometheus_removed=True
             )
 
-        # Record Prometheus histogram metrics with error handling
-        try:
-            HTTP_REQUEST_DURATION.labels(method=method, path=path, status=status).observe(duration_ms)
-            if self.debug_logging:
-                logger.debug(
-                    "Successfully recorded Prometheus HTTP request duration histogram",
-                    method=method,
-                    path=path,
-                    status=status,
-                    duration_ms=duration_ms,
-                )
-        except Exception as e:
-            logger.error(
-                "Failed to record Prometheus HTTP request duration histogram",
-                error=str(e),
-                error_type=type(e).__name__,
+        # Prometheus histogram metrics removed - using OpenTelemetry only
+        if self.debug_logging:
+            logger.debug(
+                "Prometheus HTTP request duration histogram removed - using OpenTelemetry only",
                 method=method,
                 path=path,
                 status=status,
                 duration_ms=duration_ms,
-                exc_info=True,
+                prometheus_removed=True
             )
 
         # Record OpenTelemetry counter metrics with error handling
@@ -3232,13 +2867,9 @@ class EnhancedHTTPMetricsMiddleware(BaseHTTPMiddleware):
 
 
 # Initialize metrics on module import
-logger.debug("Enhanced HTTP metrics monitoring module initialized")
-logger.debug(f"Metrics registry contains {len(_METRICS_REGISTRY)} metrics")
+logger.debug("Enhanced HTTP metrics monitoring module initialized (OpenTelemetry only)")
 
-# Log metric status for debugging
-if logger.logger.isEnabledFor(10):  # DEBUG level
-    for name, status in get_metric_status().items():
-        logger.debug(f"Metric {name}: {status}")
+# Prometheus registry logging removed - using OpenTelemetry only
 
 
 def _detect_uvicorn_thread_pool() -> Dict[str, Any]:

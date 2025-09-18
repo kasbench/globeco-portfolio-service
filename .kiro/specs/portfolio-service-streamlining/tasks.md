@@ -24,19 +24,19 @@
   - Add configuration update mechanisms without service restart
   - _Requirements: 6.5_
 
-- [ ] 2. Remove Prometheus metrics completely
+- [x] 2. Remove Prometheus metrics completely
   - Remove all Prometheus dependencies, collectors, and middleware
   - Delete /metrics endpoint and Prometheus client code
   - Clean up Prometheus-related configuration and imports
   - _Requirements: 2.1, 2.2_
 
-- [ ] 2.1 Remove Prometheus dependencies and imports
+- [x] 2.1 Remove Prometheus dependencies and imports
   - Remove prometheus_client from requirements and imports
   - Delete all Prometheus metric collectors and registries
   - Remove Prometheus-related middleware classes
   - _Requirements: 2.1, 2.2_
 
-- [ ] 2.2 Delete Prometheus endpoints and configuration
+- [x] 2.2 Delete Prometheus endpoints and configuration
   - Remove /metrics endpoint from API routes
   - Delete Prometheus scraping configuration
   - Clean up Prometheus-related environment variables

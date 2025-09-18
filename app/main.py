@@ -11,7 +11,7 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 from opentelemetry.instrumentation.logging import LoggingInstrumentor
-from prometheus_client import make_asgi_app
+# Prometheus client removed - using OpenTelemetry only
 import logging
 from app.config import settings
 from app.logging_config import setup_logging, LoggingMiddleware, get_logger
@@ -198,54 +198,9 @@ else:
 # Instrument FastAPI app
 FastAPIInstrumentor().instrument_app(app)
 
-# Add Prometheus /metrics endpoint
-metrics_app = make_asgi_app()
-app.mount("/metrics", metrics_app)
+# Prometheus /metrics endpoint removed - using OpenTelemetry only
 
-# Add explicit route for /metrics (without trailing slash) with service_namespace label
-@app.get("/metrics")
-async def get_metrics():
-    from fastapi.responses import Response
-    from prometheus_client import generate_latest
-    
-    # Generate metrics and add service_namespace label
-    metrics_output = generate_latest().decode('utf-8')
-    
-    # Add service_namespace label to all metrics
-    lines = metrics_output.split('\n')
-    modified_lines = []
-    
-    for line in lines:
-        if line.startswith('#') or not line.strip():
-            # Keep comments and empty lines as-is
-            modified_lines.append(line)
-        elif '{' in line:
-            # Metric with existing labels - add service_namespace
-            metric_name, rest = line.split('{', 1)
-            labels, value = rest.split('}', 1)
-            if labels:
-                modified_line = f'{metric_name}{{service_namespace="{settings.service_namespace}",{labels}}}{value}'
-            else:
-                modified_line = f'{metric_name}{{service_namespace="{settings.service_namespace}"}}{value}'
-            modified_lines.append(modified_line)
-        elif ' ' in line:
-            # Metric without labels - add service_namespace
-            parts = line.split(' ', 1)
-            if len(parts) == 2:
-                metric_name, value = parts
-                modified_line = f'{metric_name}{{service_namespace="{settings.service_namespace}"}} {value}'
-                modified_lines.append(modified_line)
-            else:
-                modified_lines.append(line)
-        else:
-            modified_lines.append(line)
-    
-    modified_output = '\n'.join(modified_lines)
-    
-    return Response(
-        content=modified_output,
-        media_type="text/plain; version=0.0.4; charset=utf-8"
-    )
+# Prometheus /metrics endpoint removed - using OpenTelemetry OTLP export only
 
 # Configure CORS to allow all origins
 app.add_middleware(
