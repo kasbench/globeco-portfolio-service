@@ -42,25 +42,25 @@
   - Clean up Prometheus-related environment variables
   - _Requirements: 2.1, 2.2_
 
-- [ ] 3. Implement OpenTelemetry-only monitoring
+- [x] 3. Implement OpenTelemetry-only monitoring
   - Create unified OpenTelemetry monitoring with OTLP export
   - Implement trace sampling and async metrics export
   - Add circuit breaker for monitoring endpoint failures
   - _Requirements: 2.3, 2.4, 2.5, 10.1, 10.2, 10.3_
 
-- [ ] 3.1 Create unified OpenTelemetry monitoring class
+- [x] 3.1 Create unified OpenTelemetry monitoring class
   - Write UnifiedMonitoring class with tracer and meter setup
   - Implement OTLP exporter configuration for localhost:4317
   - Add OpenTelemetry SDK initialization with proper resource attributes
   - _Requirements: 2.3, 2.4_
 
-- [ ] 3.2 Implement configurable trace sampling
+- [x] 3.2 Implement configurable trace sampling
   - Create ConfigurableSampler class with environment-based sampling rates
   - Implement sampling logic for production (1-10%) vs development (100%)
   - Add sampling configuration validation and defaults
   - _Requirements: 2.5, 10.3_
 
-- [ ] 3.3 Add async metrics export with circuit breaker
+- [x] 3.3 Add async metrics export with circuit breaker
   - Write AsyncMetricsCollector for background metrics processing
   - Implement circuit breaker pattern for OTLP export failures
   - Add retry logic with exponential backoff for export operations
