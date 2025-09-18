@@ -1,8 +1,8 @@
 from fastapi import APIRouter, HTTPException, Query
-from app.schemas import PortfolioSearchResponseDTO
+from app.schemas import PortfolioSearchResponseDTO, PortfolioPostDTO, PortfolioResponseDTO, BulkValidationError
 from app.services import PortfolioService
 from app.logging_config import get_logger
-from typing import Optional
+from typing import Optional, List
 import re
 
 logger = get_logger(__name__)
@@ -26,7 +26,7 @@ async def search_portfolios(
     
     Note: Only one of 'name' or 'name_like' can be provided.
     """
-    loger.debug("API v2: Search portfolios requested", 
+    logger.debug("API v2: Search portfolios requested", 
                endpoint="/api/v2/portfolios",
                name=name,
                name_like=name_like,
@@ -107,7 +107,7 @@ async def search_portfolios(
             pagination=pagination
         )
         
-        loger.debug("API v2: Successfully searched portfolios", 
+        logger.debug("API v2: Successfully searched portfolios", 
                    endpoint="/api/v2/portfolios",
                    total_count=total_count,
                    returned_count=len(portfolio_dtos),
@@ -142,3 +142,99 @@ def _is_valid_name_format(name: str) -> bool:
     # Allow alphanumeric characters, spaces, hyphens, and underscores
     pattern = r'^[a-zA-Z0-9\s\-_]+$'
     return bool(re.match(pattern, name))
+
+@router.post("/portfolios", response_model=List[PortfolioResponseDTO], status_code=201)
+async def create_portfolios_bulk(portfolios: List[PortfolioPostDTO]):
+    """
+    Create multiple portfolios in a single batch operation - v2 API
+    
+    Request Body:
+    - List of PortfolioPostDTO objects (1-100 portfolios)
+    - All portfolios are processed as a single transaction (all succeed or all fail)
+    
+    Returns:
+    - List of PortfolioResponseDTO objects on success (HTTP 201)
+    - Validation errors on invalid input (HTTP 400)
+    - Server errors on database failures (HTTP 500)
+    """
+    logger.info(
+        "API v2: Bulk portfolio creation requested",
+        endpoint="/api/v2/portfolios",
+        method="POST",
+        portfolio_count=len(portfolios) if portfolios else 0
+    )
+    
+    try:
+        # Validate request payload
+        if not portfolios:
+            logger.warning(
+                "API v2: Empty portfolio list provided",
+                endpoint="/api/v2/portfolios",
+                method="POST"
+            )
+            raise HTTPException(
+                status_code=400,
+                detail="Request must contain at least 1 portfolio"
+            )
+        
+        # Log portfolio names for debugging (truncated for large batches)
+        portfolio_names = [p.name for p in portfolios[:10]]  # First 10 names
+        if len(portfolios) > 10:
+            portfolio_names.append(f"... and {len(portfolios) - 10} more")
+        
+        logger.debug(
+            "API v2: Processing bulk portfolio creation",
+            endpoint="/api/v2/portfolios",
+            method="POST",
+            portfolio_count=len(portfolios),
+            portfolio_names=portfolio_names
+        )
+        
+        # Create portfolios using service layer (includes validation and retry logic)
+        created_portfolios = await PortfolioService.create_portfolios_bulk(portfolios)
+        
+        # Convert to response DTOs
+        response_dtos = [PortfolioService.portfolio_to_dto(p) for p in created_portfolios]
+        
+        logger.info(
+            "API v2: Bulk portfolio creation completed successfully",
+            endpoint="/api/v2/portfolios",
+            method="POST",
+            portfolio_count=len(response_dtos),
+            created_portfolio_ids=[dto.portfolioId for dto in response_dtos]
+        )
+        
+        return response_dtos
+        
+    except ValueError as e:
+        # Validation errors (empty request, oversized request, duplicates)
+        logger.warning(
+            "API v2: Bulk portfolio creation validation failed",
+            endpoint="/api/v2/portfolios",
+            method="POST",
+            portfolio_count=len(portfolios) if portfolios else 0,
+            validation_error=str(e)
+        )
+        raise HTTPException(
+            status_code=400,
+            detail=str(e)
+        )
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions (already have proper status codes)
+        raise
+        
+    except Exception as e:
+        # Database errors and other unexpected errors
+        logger.error(
+            "API v2: Bulk portfolio creation failed with unexpected error",
+            endpoint="/api/v2/portfolios",
+            method="POST",
+            portfolio_count=len(portfolios) if portfolios else 0,
+            error=str(e),
+            error_type=type(e).__name__
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="An unexpected error occurred while creating portfolios"
+        )

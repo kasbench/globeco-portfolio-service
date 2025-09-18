@@ -26,7 +26,7 @@
   - Add validation for empty requests and oversized requests
   - _Requirements: 1.1, 1.2, 1.3_
 
-- [ ] 5. Implement bulk portfolio POST endpoint in API v2
+- [x] 5. Implement bulk portfolio POST endpoint in API v2
   - Add POST /api/v2/portfolios endpoint in api_v2.py that accepts List[PortfolioPostDTO]
   - Implement comprehensive input validation using helper methods
   - Add proper error handling with appropriate HTTP status codes (400, 500)
@@ -34,7 +34,7 @@
   - Include structured logging for all operations and error scenarios
   - _Requirements: 1.1, 2.3, 4.1, 4.2, 4.3, 5.1, 5.2, 5.3_
 
-- [ ] 6. Write unit tests for retry logic utility
+- [x] 6. Write unit tests for retry logic utility
   - Test successful operation without retries
   - Test retry behavior with recoverable errors (connection timeouts, temporary failures)
   - Test immediate failure with non-recoverable errors (authentication, constraint violations)
