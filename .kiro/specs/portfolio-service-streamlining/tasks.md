@@ -90,25 +90,25 @@
   - Implement middleware ordering and dependency management
   - _Requirements: 3.5_
 
-- [ ] 5. Optimize database operations and tracing
+- [x] 5. Optimize database operations and tracing
   - Implement conditional database tracing
   - Optimize connection pooling configuration
   - Create fast-path bulk operations
   - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5_
 
-- [ ] 5.1 Implement conditional database tracing
+- [x] 5.1 Implement conditional database tracing
   - Modify trace_database_call function for environment-based tracing
   - Add ENABLE_DATABASE_TRACING configuration with production default false
   - Implement fast-path execution when tracing is disabled
   - _Requirements: 4.1, 4.2_
 
-- [ ] 5.2 Optimize MongoDB connection pooling
+- [x] 5.2 Optimize MongoDB connection pooling
   - Create create_optimized_client function with tuned connection settings
   - Implement connection pool configuration with maxPoolSize=20, minPoolSize=5
   - Add connection timeout and retry configuration
   - _Requirements: 4.4_
 
-- [ ] 5.3 Create optimized bulk operations service
+- [x] 5.3 Create optimized bulk operations service
   - Write OptimizedPortfolioService with fast-path bulk creation
   - Implement streamlined validation using set-based duplicate checking
   - Add direct insert_many operations without excessive logging
