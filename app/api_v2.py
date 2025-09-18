@@ -164,6 +164,24 @@ async def create_portfolios_bulk(portfolios: List[PortfolioPostDTO]):
         portfolio_count=len(portfolios) if portfolios else 0
     )
     
+    # Log the full request details for debugging
+    if portfolios:
+        request_details = []
+        for i, portfolio in enumerate(portfolios):
+            request_details.append({
+                "index": i,
+                "name": portfolio.name,
+                "dateCreated": portfolio.dateCreated.isoformat() if portfolio.dateCreated else None,
+                "version": portfolio.version
+            })
+        
+        logger.info(
+            "API v2: Request details for bulk portfolio creation",
+            endpoint="/api/v2/portfolios",
+            method="POST",
+            request_details=request_details
+        )
+    
     try:
         # Validate request payload
         if not portfolios:

@@ -42,7 +42,7 @@
   - Mock database operations to simulate various error conditions
   - _Requirements: 3.1, 3.2, 3.3_
 
-- [ ] 7. Write unit tests for bulk service method
+- [x] 7. Write unit tests for bulk service method
   - Test successful bulk creation with valid portfolio data
   - Test transaction rollback behavior when individual portfolios fail validation
   - Test transaction rollback behavior when database operations fail

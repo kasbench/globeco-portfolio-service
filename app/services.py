@@ -508,6 +508,23 @@ class PortfolioService:
             portfolio_count=len(portfolio_dtos) if portfolio_dtos else 0
         )
         
+        # Log the request details for debugging
+        if portfolio_dtos:
+            request_summary = []
+            for i, dto in enumerate(portfolio_dtos):
+                request_summary.append({
+                    "index": i,
+                    "name": dto.name,
+                    "dateCreated": dto.dateCreated.isoformat() if dto.dateCreated else None,
+                    "version": dto.version
+                })
+            
+            logger.info(
+                "Bulk portfolio creation request details",
+                operation="create_portfolios_bulk",
+                request_summary=request_summary
+            )
+        
         # Validate bulk request constraints
         PortfolioService._validate_bulk_request(portfolio_dtos)
         
@@ -531,57 +548,65 @@ class PortfolioService:
             portfolio_names=[p.name for p in portfolios]
         )
         
-        # Define the bulk operation with transaction support
+        # Define the bulk operation - simplified without transactions for now
         async def bulk_create_operation():
-            """Execute the bulk creation within a transaction"""
+            """Execute the bulk creation"""
             logger.debug(
-                "Starting transaction for bulk portfolio creation",
+                "Starting bulk portfolio creation",
                 operation="bulk_create_operation",
                 portfolio_count=len(portfolios)
             )
             
-            # Use Beanie's transaction support
-            async with await Portfolio.get_motor_client().start_session() as session:
-                async with session.start_transaction():
-                    logger.debug(
-                        "Transaction started, inserting portfolios",
-                        operation="bulk_create_operation",
-                        session_id=str(session.session_id)
-                    )
-                    
-                    # Insert all portfolios within the transaction
-                    created_portfolios = []
-                    for i, portfolio in enumerate(portfolios):
-                        try:
-                            await portfolio.insert(session=session)
-                            created_portfolios.append(portfolio)
-                            logger.debug(
-                                "Portfolio inserted in transaction",
-                                operation="bulk_create_operation",
-                                portfolio_index=i,
-                                portfolio_name=portfolio.name,
-                                portfolio_id=str(portfolio.id)
-                            )
-                        except Exception as e:
-                            logger.error(
-                                "Failed to insert portfolio in transaction",
-                                operation="bulk_create_operation",
-                                portfolio_index=i,
-                                portfolio_name=portfolio.name,
-                                error=str(e),
-                                error_type=type(e).__name__
-                            )
-                            # Re-raise to trigger transaction rollback
-                            raise
-                    
-                    logger.info(
-                        "All portfolios inserted successfully in transaction",
-                        operation="bulk_create_operation",
-                        portfolio_count=len(created_portfolios),
-                        session_id=str(session.session_id)
-                    )
-                    
-                    return created_portfolios
+            try:
+                # Insert all portfolios sequentially
+                created_portfolios = []
+                for i, portfolio in enumerate(portfolios):
+                    try:
+                        logger.debug(
+                            "Inserting portfolio",
+                            operation="bulk_create_operation",
+                            portfolio_index=i,
+                            portfolio_name=portfolio.name
+                        )
+                        
+                        await portfolio.insert()
+                        created_portfolios.append(portfolio)
+                        
+                        logger.debug(
+                            "Portfolio inserted successfully",
+                            operation="bulk_create_operation",
+                            portfolio_index=i,
+                            portfolio_name=portfolio.name,
+                            portfolio_id=str(portfolio.id)
+                        )
+                    except Exception as e:
+                        logger.error(
+                            "Failed to insert portfolio",
+                            operation="bulk_create_operation",
+                            portfolio_index=i,
+                            portfolio_name=portfolio.name,
+                            error=str(e),
+                            error_type=type(e).__name__
+                        )
+                        # Re-raise to trigger retry logic
+                        raise
+                
+                logger.info(
+                    "All portfolios inserted successfully",
+                    operation="bulk_create_operation",
+                    portfolio_count=len(created_portfolios)
+                )
+                
+                return created_portfolios
+                        
+            except Exception as e:
+                logger.error(
+                    "Error in bulk create operation",
+                    operation="bulk_create_operation",
+                    error=str(e),
+                    error_type=type(e).__name__
+                )
+                raise
         
         # Execute the bulk operation with retry logic
         try:
