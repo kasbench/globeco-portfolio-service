@@ -14,7 +14,7 @@ from opentelemetry.instrumentation.logging import LoggingInstrumentor
 # Prometheus client removed - using OpenTelemetry only
 import logging
 from app.config import settings
-from app.logging_config import setup_logging, LoggingMiddleware, get_logger
+from app.logging_config import setup_logging, get_logger
 import os
 
 # Setup structured JSON logging
@@ -136,7 +136,6 @@ LoggingInstrumentor().instrument(set_logging_format=True)
 
 # Create FastAPI app
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 from beanie import init_beanie
 from motor.motor_asyncio import AsyncIOMotorClient
 from app.config import settings
@@ -158,58 +157,26 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-# Add structured logging middleware (before other middleware)
-app.add_middleware(LoggingMiddleware, logger=logger)
+# Initialize environment-based configuration and middleware factory
+from app.environment_config import initialize_config_manager, initialize_feature_flags
+from app.middleware_factory import create_middleware_stack
 
-# Add enhanced HTTP metrics middleware if enabled
-if settings.enable_metrics:
-    from app.monitoring import EnhancedHTTPMetricsMiddleware
-    app.add_middleware(
-        EnhancedHTTPMetricsMiddleware, 
-        debug_logging=settings.metrics_debug_logging
-    )
-    logger.info("Enhanced HTTP metrics middleware enabled")
-else:
-    logger.info("Enhanced HTTP metrics middleware disabled")
+# Initialize configuration management
+config_manager = initialize_config_manager()
+feature_flags = initialize_feature_flags(config_manager)
 
-# Log thread metrics configuration for debugging
 logger.info(
-    "Thread metrics configuration",
-    enable_thread_metrics=settings.enable_thread_metrics,
-    thread_metrics_update_interval=settings.thread_metrics_update_interval,
-    thread_metrics_debug_logging=settings.thread_metrics_debug_logging
+    "Environment configuration initialized",
+    environment=config_manager.current_environment,
+    config_summary=config_manager.get_config_summary(),
+    observability_flags=feature_flags.get_observability_summary()
 )
 
-# Setup thread metrics if enabled
-if settings.enable_thread_metrics:
-    from app.monitoring import setup_thread_metrics
-    result = setup_thread_metrics(
-        enable_thread_metrics=settings.enable_thread_metrics,
-        update_interval=settings.thread_metrics_update_interval,
-        debug_logging=settings.thread_metrics_debug_logging
-    )
-    if result:
-        logger.info("Thread metrics collection enabled successfully")
-    else:
-        logger.error("Thread metrics collection setup failed")
-else:
-    logger.info("Thread metrics collection disabled")
+# Create environment-appropriate middleware stack
+create_middleware_stack(app, config_manager)
 
 # Instrument FastAPI app
 FastAPIInstrumentor().instrument_app(app)
-
-# Prometheus /metrics endpoint removed - using OpenTelemetry only
-
-# Prometheus /metrics endpoint removed - using OpenTelemetry OTLP export only
-
-# Configure CORS to allow all origins
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 # Include both v1 and v2 API routers
 app.include_router(api_v1.router)
