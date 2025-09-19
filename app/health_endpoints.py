@@ -21,9 +21,9 @@ from dataclasses import dataclass
 from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import JSONResponse, PlainTextResponse
 
-from app.database import get_database
+from app.database import create_optimized_client, test_connection_health
 from app.monitoring_health import get_monitoring_manager
-from app.circuit_breaker import get_circuit_breaker_manager
+from app.circuit_breaker import get_circuit_breaker_registry
 
 
 # Health check cache to avoid repeated expensive operations
@@ -171,23 +171,35 @@ async def readiness_probe() -> JSONResponse:
         # Database connectivity check (with timeout)
         try:
             db_start = time.perf_counter()
-            database = get_database()
+            client = create_optimized_client()
             
             # Quick ping with very short timeout
-            await asyncio.wait_for(
-                database.client.admin.command('ping'),
-                timeout=0.005  # 5ms timeout
+            is_healthy = await asyncio.wait_for(
+                test_connection_health(client, timeout=0.005),
+                timeout=0.008  # 8ms total timeout
             )
             
             db_time = round((time.perf_counter() - db_start) * 1000, 2)
-            checks["database"] = {
-                "status": "ready",
-                "response_time_ms": db_time
-            }
+            
+            if is_healthy:
+                checks["database"] = {
+                    "status": "ready",
+                    "response_time_ms": db_time
+                }
+            else:
+                checks["database"] = {
+                    "status": "unhealthy",
+                    "response_time_ms": db_time
+                }
+                is_ready = False
+            
+            # Close client
+            client.close()
+            
         except asyncio.TimeoutError:
             checks["database"] = {
                 "status": "timeout",
-                "response_time_ms": 5.0
+                "response_time_ms": 8.0
             }
             is_ready = False
         except Exception as e:
@@ -199,8 +211,8 @@ async def readiness_probe() -> JSONResponse:
         
         # Circuit breaker status check (very fast)
         try:
-            cb_manager = get_circuit_breaker_manager()
-            cb_health = cb_manager.get_health_summary()
+            cb_registry = get_circuit_breaker_registry()
+            cb_health = cb_registry.get_health_summary()
             
             checks["circuit_breakers"] = {
                 "status": "ready" if cb_health["overall_health"] > 0.5 else "degraded",
@@ -280,19 +292,31 @@ async def startup_probe() -> JSONResponse:
         # Database connection check
         try:
             db_start = time.perf_counter()
-            database = get_database()
+            client = create_optimized_client()
             
             # Ping database with short timeout
-            await asyncio.wait_for(
-                database.client.admin.command('ping'),
-                timeout=0.008  # 8ms timeout for startup
+            is_healthy = await asyncio.wait_for(
+                test_connection_health(client, timeout=0.008),
+                timeout=0.010  # 10ms total timeout for startup
             )
             
             db_time = round((time.perf_counter() - db_start) * 1000, 2)
-            checks["database"] = {
-                "status": "connected",
-                "response_time_ms": db_time
-            }
+            
+            if is_healthy:
+                checks["database"] = {
+                    "status": "connected",
+                    "response_time_ms": db_time
+                }
+            else:
+                checks["database"] = {
+                    "status": "error",
+                    "response_time_ms": db_time
+                }
+                is_started = False
+            
+            # Close client
+            client.close()
+            
         except Exception as e:
             checks["database"] = {
                 "status": "error",
@@ -382,19 +406,30 @@ async def detailed_health() -> JSONResponse:
         # Database health
         try:
             db_start = time.perf_counter()
-            database = get_database()
+            client = create_optimized_client()
             
             # More comprehensive database check
-            await database.client.admin.command('ping')
-            server_info = await database.client.server_info()
+            is_healthy = await test_connection_health(client, timeout=5.0)
             
-            db_time = round((time.perf_counter() - db_start) * 1000, 2)
-            health_info["checks"]["database"] = {
-                "status": "healthy",
-                "response_time_ms": db_time,
-                "server_version": server_info.get("version", "unknown"),
-                "connection_count": len(database.client.nodes)
-            }
+            if is_healthy:
+                server_info = await client.server_info()
+                db_time = round((time.perf_counter() - db_start) * 1000, 2)
+                health_info["checks"]["database"] = {
+                    "status": "healthy",
+                    "response_time_ms": db_time,
+                    "server_version": server_info.get("version", "unknown"),
+                    "connection_configured": True
+                }
+            else:
+                health_info["checks"]["database"] = {
+                    "status": "unhealthy",
+                    "error": "Connection health check failed"
+                }
+                overall_healthy = False
+            
+            # Close client
+            client.close()
+            
         except Exception as e:
             health_info["checks"]["database"] = {
                 "status": "unhealthy",
@@ -404,8 +439,8 @@ async def detailed_health() -> JSONResponse:
         
         # Circuit breaker health
         try:
-            cb_manager = get_circuit_breaker_manager()
-            cb_health = cb_manager.get_health_summary()
+            cb_registry = get_circuit_breaker_registry()
+            cb_health = cb_registry.get_health_summary()
             
             health_info["checks"]["circuit_breakers"] = {
                 "status": "healthy" if cb_health["overall_health"] > 0.5 else "degraded",
@@ -488,8 +523,8 @@ async def health_metrics() -> JSONResponse:
         
         # Add circuit breaker metrics
         try:
-            cb_manager = get_circuit_breaker_manager()
-            cb_health = cb_manager.get_health_summary()
+            cb_registry = get_circuit_breaker_registry()
+            cb_health = cb_registry.get_health_summary()
             metrics["circuit_breakers"] = cb_health
         except Exception:
             pass

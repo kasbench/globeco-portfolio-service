@@ -2,7 +2,7 @@
 
 # Multi-stage build for optimized production image
 # Stage 1: Build stage with full Python environment
-FROM python:3.13-slim as builder
+FROM python:3.13-slim AS builder
 
 # Define build arguments for multi-arch support
 ARG BUILDPLATFORM
@@ -26,18 +26,42 @@ WORKDIR /app
 COPY pyproject.toml ./
 COPY README.md ./
 
-# Create virtual environment and install dependencies
+# Create virtual environment
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Install dependencies using uv for speed
-RUN uv pip install --no-cache-dir -e .
+# Extract and install dependencies only (not the package itself)
+RUN uv pip install --no-cache-dir \
+    beanie>=1.29.0 \
+    dnspython>=2.7.0 \
+    "fastapi[standard]>=0.115.12" \
+    gunicorn>=23.0.0 \
+    mongo-migrate>=0.1.2 \
+    pydantic-settings>=2.9.1 \
+    pytest-asyncio>=0.26.0 \
+    pytest>=8.3.5 \
+    "testcontainers[mongodb]>=4.10.0" \
+    opentelemetry-api>=1.34.0 \
+    opentelemetry-sdk>=1.34.0 \
+    opentelemetry-instrumentation>=0.55b1 \
+    opentelemetry-exporter-otlp>=1.34.0 \
+    opentelemetry-instrumentation-fastapi>=0.55b1 \
+    opentelemetry-instrumentation-grpc>=0.55b1 \
+    opentelemetry-instrumentation-logging>=0.55b1 \
+    opentelemetry-instrumentation-requests>=0.55b1 \
+    opentelemetry-instrumentation-httpx>=0.55b1 \
+    motor>=3.7.1
 
 # Copy application code
 COPY app/ ./app/
 
-# Stage 2: Runtime stage with distroless image
-FROM gcr.io/distroless/python3-debian12:latest as production
+# Stage 2: Runtime stage with minimal Python image
+FROM python:3.13-slim AS production
+
+# Install minimal runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy virtual environment from builder stage
 COPY --from=builder /opt/venv /opt/venv
@@ -55,15 +79,16 @@ ENV PATH="/opt/venv/bin:$PATH"
 ENV PYTHONPATH="/app"
 
 # Create non-root user for security
-USER 65534:65534
+RUN groupadd -r appuser && useradd -r -g appuser appuser
+USER appuser
 
 # Expose port
 EXPOSE 8000
 
 # Health check for container orchestration
+# Note: Kubernetes will use the /health/live endpoint instead
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD ["/opt/venv/bin/python", "-c", "import requests; requests.get('http://localhost:8000/health', timeout=5)"]
+    CMD curl -f http://localhost:8000/health || exit 1
 
 # Start the FastAPI app with optimized Gunicorn configuration
-ENTRYPOINT ["/opt/venv/bin/gunicorn"]
-CMD ["app.main:app", "-k", "uvicorn.workers.UvicornWorker", "-b", "0.0.0.0:8000", "--workers", "2", "--threads", "1", "--max-requests", "1000", "--max-requests-jitter", "100", "--preload"]
+CMD ["/opt/venv/bin/gunicorn", "app.main:app", "-k", "uvicorn.workers.UvicornWorker", "-b", "0.0.0.0:8000", "--workers", "2", "--threads", "1", "--max-requests", "1000", "--max-requests-jitter", "100", "--preload"]
