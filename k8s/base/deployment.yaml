@@ -1,0 +1,144 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: globeco-portfolio-service
+  namespace: globeco
+  labels:
+    app: globeco-portfolio-service
+    version: v1
+spec:
+  selector:
+    matchLabels:
+      app: globeco-portfolio-service
+  template:
+    metadata:
+      labels:
+        app: globeco-portfolio-service
+        version: v1
+      annotations:
+        prometheus.io/scrape: "false"  # Prometheus completely removed
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+      containers:
+        - name: globeco-portfolio-service
+          image: kasbench/globeco-portfolio-service:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8000
+              name: http
+              protocol: TCP
+          env:
+            # Node and Pod Information
+            - name: NODE_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            - name: MY_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: MY_POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: MY_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            
+            # Database Configuration
+            - name: MONGODB_URI
+              value: "mongodb://globeco-portfolio-service-mongodb:27017"
+            
+            # Service Configuration
+            - name: SERVICE_NAMESPACE
+              value: "globeco"
+            - name: OTEL_SERVICE_NAME
+              value: "globeco-portfolio-service"
+            - name: OTEL_SERVICE_NAMESPACE
+              value: "globeco"
+            
+            # OpenTelemetry Configuration (OTLP only, no Prometheus)
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://$(NODE_IP):4318"
+            - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+              value: "http://$(NODE_IP):4318/v1/traces"
+            - name: OTEL_EXPORTER_OTLP_METRICS_ENDPOINT
+              value: "http://$(NODE_IP):4318/v1/metrics"
+            - name: OTEL_EXPORTER_OTLP_INSECURE
+              value: "true"
+            - name: OTEL_METRICS_EXPORT_INTERVAL_SECONDS
+              value: "30"
+            - name: OTEL_METRICS_EXPORT_TIMEOUT_SECONDS
+              value: "10"
+          
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+            capabilities:
+              drop:
+                - ALL
+          
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: var-tmp
+              mountPath: /var/tmp
+          
+          # Optimized health probes with <10ms response time targets
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: /health/startup
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 15
+      
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: var-tmp
+          emptyDir: {}
+      
+      terminationGracePeriodSeconds: 30
+      restartPolicy: Always
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: globeco-portfolio-service
+  namespace: globeco
+  labels:
+    app: globeco-portfolio-service
+spec:
+  selector:
+    app: globeco-portfolio-service
+  ports:
+    - name: http
+      protocol: TCP
+      port: 8000
+      targetPort: 8000
+  type: ClusterIP

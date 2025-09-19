@@ -1,0 +1,41 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: globeco-portfolio-service-hpa
+spec:
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 60  # Conservative threshold for production stability
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 65  # Conservative threshold for production stability
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300  # Conservative scaling for production
+      policies:
+      - type: Percent
+        value: 25  # Conservative scale down
+        periodSeconds: 60
+      - type: Pods
+        value: 1
+        periodSeconds: 60
+      selectPolicy: Min
+    scaleUp:
+      stabilizationWindowSeconds: 60   # Responsive but stable scale up
+      policies:
+      - type: Percent
+        value: 50  # Moderate scale up
+        periodSeconds: 30
+      - type: Pods
+        value: 2
+        periodSeconds: 30
+      selectPolicy: Max

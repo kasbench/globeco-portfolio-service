@@ -1,2 +1,91 @@
-.venv 
-uv.lock 
+# Python
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+env
+pip-log.txt
+pip-delete-this-directory.txt
+.tox
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+.git
+.mypy_cache
+.pytest_cache
+.hypothesis
+
+# Package files
+uv.lock
+*.egg-info
+dist
+build
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Documentation and configs
+*.md
+!README.md
+.gitignore
+.dockerignore
+Dockerfile*
+
+# Test files
+tests/
+test_*.py
+*_test.py
+
+# Development files
+*.sh
+debug_*.py
+check_*.py
+compare_*.py
+deploy_*.sh
+disable_*.py
+enable_*.py
+example_*.py
+fix_*.sh
+restore_*.py
+switch_*.py
+test_*.py
+verify_*.py
+
+# Kubernetes and deployment
+k8s/
+*.yaml
+!otel-collector-config.yaml
+values.yaml
+
+# Troubleshooting and documentation
+*TROUBLESHOOTING*.md
+*GUIDE*.md
+*SUMMARY*.md
+*STRATEGY*.md
+*PLAN*.md
+*REPORT*.md
+*FIX*.md
+cursor-log.md
+
+# Specs and documentation
+.kiro/
+documentation/

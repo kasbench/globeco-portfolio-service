@@ -183,12 +183,17 @@ app.include_router(api_v1.router)
 app.include_router(api_v2.router)
 app.include_router(api_fast.router)
 
+# Include optimized health endpoints
+from app.health_endpoints import router as health_router
+app.include_router(health_router)
+
 @app.get("/")
 async def root():
     logger.debug("Root endpoint accessed")
     return {"message": "Hello World"}
 
+# Keep legacy health endpoint for backward compatibility
 @app.get("/health")
 async def health():
-    logger.debug("Health check endpoint accessed")
+    logger.debug("Legacy health check endpoint accessed")
     return {"status": "healthy", "service": "globeco-portfolio-service"} 

@@ -1,0 +1,84 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: globeco-portfolio-service
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  template:
+    spec:
+      containers:
+        - name: globeco-portfolio-service
+          env:
+            # Production Environment Configuration
+            - name: ENVIRONMENT
+              value: "production"
+            - name: LOG_LEVEL
+              value: "WARNING"
+            
+            # Minimal Observability for Production Performance
+            - name: ENABLE_METRICS
+              value: "true"  # Only essential RED metrics
+            - name: ENABLE_TRACING
+              value: "false"  # Disabled for maximum performance
+            - name: ENABLE_DATABASE_TRACING
+              value: "false"  # Disabled for maximum performance
+            - name: ENABLE_THREAD_METRICS
+              value: "false"  # Disabled for maximum performance
+            - name: ENABLE_REQUEST_LOGGING
+              value: "false"  # Disabled for maximum performance
+            - name: ENABLE_METRICS_MIDDLEWARE
+              value: "false"  # Disabled for maximum performance
+            - name: ENABLE_PERFORMANCE_PROFILING
+              value: "false"  # Disabled for maximum performance
+            
+            # Production Sampling (1% for critical traces only)
+            - name: TRACE_SAMPLE_RATE
+              value: "0.01"
+            - name: METRICS_DEBUG_LOGGING
+              value: "false"
+            - name: THREAD_METRICS_DEBUG_LOGGING
+              value: "false"
+            
+            # Optimized export intervals for production
+            - name: OTEL_METRICS_EXPORT_INTERVAL_SECONDS
+              value: "60"
+          
+          resources:
+            requests:
+              cpu: "100m"      # As per design requirements
+              memory: "128Mi"  # As per design requirements
+            limits:
+              cpu: "200m"      # As per design requirements
+              memory: "256Mi"  # As per design requirements
+          
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 15

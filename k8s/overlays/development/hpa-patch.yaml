@@ -1,0 +1,33 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: globeco-portfolio-service-hpa
+spec:
+  minReplicas: 1
+  maxReplicas: 3
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 80  # Higher threshold for development
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 85  # Higher threshold for development
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 180  # Faster scaling for development
+      policies:
+      - type: Percent
+        value: 100  # Allow aggressive scale down in dev
+        periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 30   # Very fast scale up for development
+      policies:
+      - type: Percent
+        value: 200  # Allow aggressive scale up in dev
+        periodSeconds: 15
