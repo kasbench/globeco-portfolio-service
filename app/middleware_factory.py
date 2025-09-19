@@ -83,6 +83,16 @@ class MiddlewareFactory:
                     f"Enhanced HTTP metrics middleware not available: {e}"
                 )
             
+            # Fast-path middleware for optimized request processing
+            try:
+                from app.fast_path_middleware import FastPathMiddleware
+                self._middleware_registry["fast_path"] = FastPathMiddleware
+                self._conditional_middleware.append("fast_path")
+            except ImportError as e:
+                self._logger.warning(
+                    f"Fast-path middleware not available: {e}"
+                )
+            
             try:
                 from app.lightweight_middleware import LightweightPerformanceMiddleware
                 self._middleware_registry["performance"] = LightweightPerformanceMiddleware
@@ -357,6 +367,20 @@ class MiddlewareFactory:
                 f"(config={config.enable_thread_monitoring}, "
                 f"feature_flag={self._feature_flags.is_enabled('enable_thread_monitoring')})"
             )
+        
+        # Apply fast-path middleware if enabled (for performance optimization)
+        if (self._config_manager.is_production() or 
+            self._feature_flags.is_enabled("enable_fast_path_middleware")):
+            try:
+                if "fast_path" in self._middleware_registry:
+                    app.add_middleware(
+                        self._middleware_registry["fast_path"],
+                        max_request_size=1024 * 1024  # 1MB
+                    )
+                    conditional_applied.append("fast_path")
+                    self._logger.info("Applied fast-path middleware for optimized request processing")
+            except Exception as e:
+                self._logger.error(f"Failed to apply fast-path middleware: {e}")
         
         # Apply request logging middleware if enabled
         if config.enable_request_logging:

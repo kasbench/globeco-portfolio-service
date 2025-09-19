@@ -140,7 +140,7 @@ from beanie import init_beanie
 from motor.motor_asyncio import AsyncIOMotorClient
 from app.config import settings
 from app.models import Portfolio
-from app import api_v1, api_v2
+from app import api_v1, api_v2, api_fast
 from app.database import create_indexes
 from contextlib import asynccontextmanager
 
@@ -178,9 +178,10 @@ create_middleware_stack(app, config_manager)
 # Instrument FastAPI app
 FastAPIInstrumentor().instrument_app(app)
 
-# Include both v1 and v2 API routers
+# Include v1, v2, and fast-path API routers
 app.include_router(api_v1.router)
 app.include_router(api_v2.router)
+app.include_router(api_fast.router)
 
 @app.get("/")
 async def root():

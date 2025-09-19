@@ -2,6 +2,9 @@ from app.models import Portfolio
 from app.schemas import PortfolioResponseDTO, PaginationDTO, PortfolioSearchResponseDTO, PortfolioPostDTO
 from app.tracing import trace_database_call
 from app.logging_config import get_logger
+from app.database import create_optimized_client, test_connection_health
+from app.config import settings
+from app.environment_config import get_config_manager
 from bson import ObjectId
 from typing import List, Optional, Tuple, Any, Callable
 from pymongo.errors import (
@@ -16,11 +19,334 @@ from pymongo.errors import (
 )
 from beanie import WriteRules
 from datetime import datetime, UTC
+from motor.motor_asyncio import AsyncIOMotorClient
 import re
 import math
 import asyncio
 
 logger = get_logger(__name__)
+
+
+class StreamlinedPortfolioService:
+    """
+    Streamlined Portfolio Service with minimal abstraction layers.
+    
+    Implements direct database operations where appropriate and removes
+    unnecessary layers for performance optimization while maintaining
+    essential functionality.
+    """
+    
+    def __init__(self):
+        """Initialize streamlined service with direct database access."""
+        self._client: Optional[AsyncIOMotorClient] = None
+        self._db = None
+        self._collection = None
+        self._config_manager = None
+    
+    async def _ensure_connection(self) -> None:
+        """Ensure optimized database connection is established."""
+        if self._client is None:
+            self._client = create_optimized_client()
+            self._db = self._client[settings.mongodb_db]
+            self._collection = self._db.portfolio
+            
+            # Test connection health
+            if not await test_connection_health(self._client):
+                await self._close_connection()
+                raise ConnectionFailure("Failed to establish healthy MongoDB connection")
+    
+    async def _close_connection(self) -> None:
+        """Close database connection and cleanup resources."""
+        if self._client:
+            self._client.close()
+            self._client = None
+            self._db = None
+            self._collection = None
+    
+    async def __aenter__(self):
+        """Async context manager entry."""
+        await self._ensure_connection()
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit."""
+        await self._close_connection()
+    
+    def _get_config_manager(self):
+        """Get configuration manager with caching."""
+        if self._config_manager is None:
+            try:
+                self._config_manager = get_config_manager()
+            except Exception as e:
+                logger.warning(f"Failed to get config manager, using defaults: {e}")
+                self._config_manager = None
+        return self._config_manager
+    
+    def _should_trace_database(self) -> bool:
+        """Determine if database operations should be traced based on environment."""
+        config_manager = self._get_config_manager()
+        if config_manager:
+            return config_manager.get_database_config().enable_tracing
+        return False  # Default to no tracing for performance
+    
+    async def _execute_direct_operation(self, operation_name: str, operation: Callable) -> Any:
+        """
+        Execute database operation with conditional tracing.
+        
+        Uses direct execution when tracing is disabled for maximum performance,
+        or traced execution when tracing is enabled for observability.
+        """
+        if self._should_trace_database():
+            return await trace_database_call(operation_name, "portfolio", operation)
+        else:
+            # Direct execution without tracing overhead
+            return await operation()
+    
+    async def get_all_portfolios_direct(self) -> List[Portfolio]:
+        """Get all portfolios using direct database access."""
+        await self._ensure_connection()
+        
+        async def direct_find_all():
+            cursor = self._collection.find({})
+            documents = await cursor.to_list(length=None)
+            
+            # Convert documents to Portfolio objects
+            portfolios = []
+            for doc in documents:
+                portfolio = Portfolio(
+                    id=doc["_id"],
+                    name=doc["name"],
+                    dateCreated=doc["dateCreated"],
+                    version=doc["version"]
+                )
+                portfolios.append(portfolio)
+            return portfolios
+        
+        return await self._execute_direct_operation("find_all_direct", direct_find_all)
+    
+    async def get_portfolio_by_id_direct(self, portfolio_id: str) -> Optional[Portfolio]:
+        """Get portfolio by ID using direct database access."""
+        await self._ensure_connection()
+        
+        async def direct_find_by_id():
+            try:
+                doc = await self._collection.find_one({"_id": ObjectId(portfolio_id)})
+                if doc:
+                    return Portfolio(
+                        id=doc["_id"],
+                        name=doc["name"],
+                        dateCreated=doc["dateCreated"],
+                        version=doc["version"]
+                    )
+                return None
+            except Exception as e:
+                logger.error(f"Error in direct find by ID: {e}")
+                return None
+        
+        return await self._execute_direct_operation("find_by_id_direct", direct_find_by_id)
+    
+    async def create_portfolio_direct(self, portfolio: Portfolio) -> Portfolio:
+        """Create portfolio using direct database access."""
+        await self._ensure_connection()
+        
+        async def direct_insert():
+            doc = {
+                "name": portfolio.name,
+                "dateCreated": portfolio.dateCreated,
+                "version": portfolio.version
+            }
+            result = await self._collection.insert_one(doc)
+            portfolio.id = result.inserted_id
+            return portfolio
+        
+        return await self._execute_direct_operation("insert_direct", direct_insert)
+    
+    async def update_portfolio_direct(self, portfolio: Portfolio) -> Portfolio:
+        """Update portfolio using direct database access."""
+        await self._ensure_connection()
+        
+        async def direct_update():
+            update_doc = {
+                "$set": {
+                    "name": portfolio.name,
+                    "dateCreated": portfolio.dateCreated,
+                    "version": portfolio.version
+                }
+            }
+            await self._collection.update_one(
+                {"_id": portfolio.id},
+                update_doc
+            )
+            return portfolio
+        
+        return await self._execute_direct_operation("update_direct", direct_update)
+    
+    async def delete_portfolio_direct(self, portfolio: Portfolio) -> None:
+        """Delete portfolio using direct database access."""
+        await self._ensure_connection()
+        
+        async def direct_delete():
+            await self._collection.delete_one({"_id": portfolio.id})
+        
+        await self._execute_direct_operation("delete_direct", direct_delete)
+    
+    async def search_portfolios_direct(
+        self,
+        name: Optional[str] = None,
+        name_like: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0
+    ) -> Tuple[List[Portfolio], int]:
+        """Search portfolios using direct database access with optimized queries."""
+        await self._ensure_connection()
+        
+        async def direct_search():
+            query = {}
+            
+            if name:
+                # Exact match (case-insensitive) - use index-friendly query
+                query["name"] = {"$regex": f"^{re.escape(name)}$", "$options": "i"}
+            elif name_like:
+                # Partial match (case-insensitive) - use index-friendly query
+                query["name"] = {"$regex": re.escape(name_like), "$options": "i"}
+            
+            # Get total count using optimized count operation
+            total_count = await self._collection.count_documents(query)
+            
+            # Get paginated results with optimized projection
+            cursor = self._collection.find(
+                query,
+                {"_id": 1, "name": 1, "dateCreated": 1, "version": 1}  # Explicit projection
+            ).sort("dateCreated", -1).skip(offset).limit(limit)
+            
+            documents = await cursor.to_list(length=limit)
+            
+            # Convert to Portfolio objects
+            portfolios = []
+            for doc in documents:
+                portfolio = Portfolio(
+                    id=doc["_id"],
+                    name=doc["name"],
+                    dateCreated=doc["dateCreated"],
+                    version=doc["version"]
+                )
+                portfolios.append(portfolio)
+            
+            return portfolios, total_count
+        
+        return await self._execute_direct_operation("search_direct", direct_search)
+    
+    async def create_portfolios_bulk_direct(self, portfolio_dtos: List[PortfolioPostDTO]) -> List[Portfolio]:
+        """
+        Create multiple portfolios using direct bulk database operations.
+        
+        Implements optimized bulk insertion with minimal overhead and
+        direct database access for maximum performance.
+        """
+        await self._ensure_connection()
+        
+        # Basic validation
+        if not portfolio_dtos or len(portfolio_dtos) == 0:
+            raise ValueError("Request must contain at least 1 portfolio")
+        
+        if len(portfolio_dtos) > 100:
+            raise ValueError("Request cannot contain more than 100 portfolios")
+        
+        # Check for duplicates within batch using set for O(n) performance
+        names_seen = set()
+        duplicates = []
+        for dto in portfolio_dtos:
+            normalized_name = dto.name.strip().lower()
+            if normalized_name in names_seen:
+                duplicates.append(dto.name)
+            else:
+                names_seen.add(normalized_name)
+        
+        if duplicates:
+            raise ValueError(f"Duplicate portfolio names found: {', '.join(duplicates)}")
+        
+        async def direct_bulk_insert():
+            # Check for existing names in database
+            portfolio_names = [dto.name for dto in portfolio_dtos]
+            existing_query = {
+                "$or": [
+                    {"name": {"$regex": f"^{re.escape(name)}$", "$options": "i"}}
+                    for name in portfolio_names
+                ]
+            }
+            
+            existing_docs = await self._collection.find(
+                existing_query,
+                {"name": 1, "_id": 0}
+            ).to_list(length=len(portfolio_names))
+            
+            if existing_docs:
+                existing_names = [doc["name"] for doc in existing_docs]
+                raise ValueError(f"Portfolios already exist: {', '.join(existing_names)}")
+            
+            # Prepare documents for bulk insertion
+            current_time = datetime.now(UTC)
+            documents = []
+            
+            for dto in portfolio_dtos:
+                doc = {
+                    "name": dto.name,
+                    "dateCreated": dto.dateCreated if dto.dateCreated else current_time,
+                    "version": dto.version if dto.version is not None else 1
+                }
+                documents.append(doc)
+            
+            # Execute bulk insert
+            result = await self._collection.insert_many(
+                documents,
+                ordered=False  # Better performance, allow partial success
+            )
+            
+            # Convert to Portfolio objects
+            portfolios = []
+            for i, doc in enumerate(documents):
+                doc["_id"] = result.inserted_ids[i]
+                portfolio = Portfolio(
+                    id=doc["_id"],
+                    name=doc["name"],
+                    dateCreated=doc["dateCreated"],
+                    version=doc["version"]
+                )
+                portfolios.append(portfolio)
+            
+            return portfolios
+        
+        return await self._execute_direct_operation("bulk_insert_direct", direct_bulk_insert)
+    
+    @staticmethod
+    def portfolio_to_dto(portfolio: Portfolio) -> PortfolioResponseDTO:
+        """Convert Portfolio model to DTO - static method for performance."""
+        return PortfolioResponseDTO(
+            portfolioId=str(portfolio.id),
+            name=portfolio.name,
+            dateCreated=portfolio.dateCreated,
+            version=portfolio.version
+        )
+    
+    @staticmethod
+    def create_pagination_dto(
+        total_elements: int,
+        current_page: int,
+        page_size: int
+    ) -> PaginationDTO:
+        """Create pagination metadata - static method for performance."""
+        total_pages = math.ceil(total_elements / page_size) if total_elements > 0 else 0
+        has_next = current_page < total_pages - 1
+        has_previous = current_page > 0
+        
+        return PaginationDTO(
+            totalElements=total_elements,
+            totalPages=total_pages,
+            currentPage=current_page,
+            pageSize=page_size,
+            hasNext=has_next,
+            hasPrevious=has_previous
+        )
 
 
 class PortfolioService:
