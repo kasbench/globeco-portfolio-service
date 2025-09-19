@@ -2,11 +2,18 @@ apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
   name: globeco-portfolio-service-hpa
+  namespace: globeco
+  labels:
+    app: globeco-portfolio-service
+    version: v2.0.0
+    component: portfolio-service
 spec:
-  minReplicas: 3   # Minimum 3 replicas for production HA
-  maxReplicas: 10  # Scale up to 10 replicas under load
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: globeco-portfolio-service
   
-  # Production scaling behavior (conservative scale-down, aggressive scale-up)
+  # Scaling behavior optimized for performance requirements
   behavior:
     scaleDown:
       stabilizationWindowSeconds: 300  # 5 minutes - prevent flapping
@@ -20,7 +27,7 @@ spec:
       selectPolicy: Min      # Use the more conservative policy
     
     scaleUp:
-      stabilizationWindowSeconds: 60   # 1 minute - faster scale up for production
+      stabilizationWindowSeconds: 60   # 1 minute - faster scale up
       policies:
         - type: Percent
           value: 100         # Scale up by 100% max
@@ -30,9 +37,9 @@ spec:
           periodSeconds: 30
       selectPolicy: Max      # Use the more aggressive policy
   
-  # Production metrics (aggressive scaling to maintain performance)
+  # Metrics for scaling decisions
   metrics:
-    # CPU utilization target (lower threshold for production)
+    # CPU utilization target
     - type: Resource
       resource:
         name: cpu
@@ -47,12 +54,20 @@ spec:
         target:
           type: Utilization
           averageUtilization: 80  # Scale when memory > 80%
-    
-    # Custom metrics (if available)
-    # - type: Pods
-    #   pods:
-    #     metric:
-    #       name: http_requests_per_second
-    #     target:
-    #       type: AverageValue
-    #       averageValue: "100"  # Scale when > 100 RPS per pod
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: globeco-portfolio-service-pdb
+  namespace: globeco
+  labels:
+    app: globeco-portfolio-service
+    version: v2.0.0
+    component: portfolio-service
+spec:
+  selector:
+    matchLabels:
+      app: globeco-portfolio-service
+  minAvailable: 1  # Always keep at least 1 pod running
+  # Alternative: maxUnavailable: 50%

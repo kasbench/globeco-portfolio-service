@@ -1,9 +1,58 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-resources:
-  - deployment.yaml
-  - hpa.yaml
+metadata:
+  name: globeco-portfolio-service-base
+  annotations:
+    config.kubernetes.io/local-config: "true"
 
+# Base resources for Portfolio Service v2.0.0
+resources:
+  - deployment-optimized.yaml
+  - hpa-optimized.yaml
+
+# Common labels applied to all resources
 commonLabels:
   app: globeco-portfolio-service
+  component: portfolio-service
+  tier: backend
+  managed-by: kustomize
+
+# Common annotations
+commonAnnotations:
+  app.kubernetes.io/name: globeco-portfolio-service
+  app.kubernetes.io/version: v2.0.0
+  app.kubernetes.io/component: portfolio-service
+  app.kubernetes.io/part-of: globeco-platform
+  app.kubernetes.io/managed-by: kustomize
+
+# Default namespace (can be overridden by overlays)
+namespace: globeco
+
+# Default image configuration
+images:
+  - name: kasbench/globeco-portfolio-service
+    newTag: v2.0.0
+
+# Default replica count (can be overridden by overlays)
+replicas:
+  - name: globeco-portfolio-service
+    count: 2
+
+# Resource name prefix (can be overridden by overlays)
+# namePrefix: ""
+
+# Resource name suffix (can be overridden by overlays)
+# nameSuffix: ""
+
+# Configuration transformers
+configurations:
+  - kustomizeconfig.yaml
+
+# Generators (none in base, defined in overlays)
+# configMapGenerator: []
+# secretGenerator: []
+
+# Patches (none in base, defined in overlays)
+# patchesStrategicMerge: []
+# patchesJson6902: []

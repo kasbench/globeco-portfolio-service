@@ -1,0 +1,188 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: portfolio-service-alertmanager-config
+  namespace: globeco
+  labels:
+    app: globeco-portfolio-service
+    component: alerting
+data:
+  alertmanager.yml: |
+    global:
+      smtp_smarthost: 'localhost:587'
+      smtp_from: 'alerts@globeco.com'
+      smtp_auth_username: 'alerts@globeco.com'
+      smtp_auth_password: 'password'  # Use secret in production
+      
+    # Routing configuration
+    route:
+      group_by: ['alertname', 'service', 'environment']
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+      receiver: 'default'
+      routes:
+        # Critical alerts - immediate notification
+        - match:
+            severity: critical
+          receiver: 'critical-alerts'
+          group_wait: 10s
+          repeat_interval: 1h
+          
+        # Performance alerts - during business hours
+        - match:
+            component: performance
+          receiver: 'performance-alerts'
+          active_time_intervals:
+            - business-hours
+            
+        # Database alerts - immediate notification
+        - match:
+            component: database
+          receiver: 'database-alerts'
+          group_wait: 15s
+          
+        # Business alerts - less urgent
+        - match:
+            component: business
+          receiver: 'business-alerts'
+          repeat_interval: 12h
+    
+    # Time intervals
+    time_intervals:
+      - name: business-hours
+        time_intervals:
+          - times:
+              - start_time: '09:00'
+                end_time: '17:00'
+            weekdays: ['monday:friday']
+            location: 'UTC'
+    
+    # Inhibition rules
+    inhibit_rules:
+      # Inhibit performance alerts when service is down
+      - source_matchers:
+          - alertname="PortfolioServiceHealthCheckFailing"
+        target_matchers:
+          - component="performance"
+        equal: ['service', 'environment']
+        
+      # Inhibit individual operation alerts when bulk operations are slow
+      - source_matchers:
+          - alertname="PortfolioServiceBulkPerformanceRegression"
+        target_matchers:
+          - alertname="PortfolioServiceSingleOperationSlow"
+        equal: ['service', 'environment']
+    
+    # Receivers
+    receivers:
+      - name: 'default'
+        email_configs:
+          - to: 'devops@globeco.com'
+            subject: '[Portfolio Service] {{ .GroupLabels.alertname }}'
+            body: |
+              {{ range .Alerts }}
+              Alert: {{ .Annotations.summary }}
+              Description: {{ .Annotations.description }}
+              Service: {{ .Labels.service }}
+              Environment: {{ .Labels.environment }}
+              Severity: {{ .Labels.severity }}
+              {{ if .Annotations.runbook_url }}
+              Runbook: {{ .Annotations.runbook_url }}
+              {{ end }}
+              {{ end }}
+      
+      - name: 'critical-alerts'
+        email_configs:
+          - to: 'oncall@globeco.com'
+            subject: '[CRITICAL] Portfolio Service Alert'
+            body: |
+              🚨 CRITICAL ALERT 🚨
+              
+              {{ range .Alerts }}
+              Alert: {{ .Annotations.summary }}
+              Description: {{ .Annotations.description }}
+              Service: {{ .Labels.service }}
+              Environment: {{ .Labels.environment }}
+              
+              {{ if .Annotations.runbook_url }}
+              Immediate Action Required: {{ .Annotations.runbook_url }}
+              {{ end }}
+              {{ end }}
+        slack_configs:
+          - api_url: 'https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK'
+            channel: '#alerts-critical'
+            title: 'Portfolio Service Critical Alert'
+            text: |
+              {{ range .Alerts }}
+              🚨 {{ .Annotations.summary }}
+              Environment: {{ .Labels.environment }}
+              {{ .Annotations.description }}
+              {{ end }}
+            color: 'danger'
+      
+      - name: 'performance-alerts'
+        email_configs:
+          - to: 'performance-team@globeco.com'
+            subject: '[Performance] Portfolio Service Alert'
+            body: |
+              ⚠️ Performance Alert
+              
+              {{ range .Alerts }}
+              Alert: {{ .Annotations.summary }}
+              Description: {{ .Annotations.description }}
+              Service: {{ .Labels.service }}
+              Environment: {{ .Labels.environment }}
+              {{ end }}
+        slack_configs:
+          - api_url: 'https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK'
+            channel: '#performance-alerts'
+            title: 'Portfolio Service Performance Alert'
+            text: |
+              {{ range .Alerts }}
+              ⚠️ {{ .Annotations.summary }}
+              {{ .Annotations.description }}
+              {{ end }}
+            color: 'warning'
+      
+      - name: 'database-alerts'
+        email_configs:
+          - to: 'database-team@globeco.com'
+            subject: '[Database] Portfolio Service Alert'
+            body: |
+              🗄️ Database Alert
+              
+              {{ range .Alerts }}
+              Alert: {{ .Annotations.summary }}
+              Description: {{ .Annotations.description }}
+              Service: {{ .Labels.service }}
+              Environment: {{ .Labels.environment }}
+              {{ end }}
+      
+      - name: 'business-alerts'
+        email_configs:
+          - to: 'business-team@globeco.com'
+            subject: '[Business Metrics] Portfolio Service Alert'
+            body: |
+              📊 Business Metrics Alert
+              
+              {{ range .Alerts }}
+              Alert: {{ .Annotations.summary }}
+              Description: {{ .Annotations.description }}
+              Service: {{ .Labels.service }}
+              Environment: {{ .Labels.environment }}
+              {{ end }}
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: portfolio-service-alertmanager-secrets
+  namespace: globeco
+  labels:
+    app: globeco-portfolio-service
+    component: alerting
+type: Opaque
+stringData:
+  smtp_password: "your-smtp-password"  # Replace with actual password
+  slack_webhook_url: "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK"  # Replace with actual webhook

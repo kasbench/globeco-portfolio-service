@@ -3,79 +3,81 @@ kind: Deployment
 metadata:
   name: globeco-portfolio-service
 spec:
-  replicas: 1
+  replicas: 1  # Single replica for development
   template:
+    metadata:
+      annotations:
+        deployment.environment: "development"
     spec:
       containers:
         - name: globeco-portfolio-service
+          # Development environment configuration
           env:
-            # Development Environment Configuration
+            # Environment Profile
+            - name: PORTFOLIO_SERVICE_ENV
+              value: "development"
             - name: ENVIRONMENT
               value: "development"
-            - name: LOG_LEVEL
-              value: "DEBUG"
             
-            # Full Observability for Development
+            # Monitoring Configuration (Development - full observability)
+            - name: ENABLE_TRACING
+              value: "true"   # Full tracing in development
             - name: ENABLE_METRICS
               value: "true"
-            - name: ENABLE_TRACING
-              value: "true"
-            - name: ENABLE_DATABASE_TRACING
-              value: "true"
-            - name: ENABLE_THREAD_METRICS
-              value: "true"
+            - name: METRICS_SAMPLE_RATE
+              value: "1.0"    # 100% sampling
+            - name: OTEL_METRICS_EXPORT_INTERVAL_SECONDS
+              value: "10"     # Faster export for development
+            
+            # Middleware Configuration (Development - full middleware)
             - name: ENABLE_REQUEST_LOGGING
               value: "true"
             - name: ENABLE_METRICS_MIDDLEWARE
               value: "true"
+            - name: ENABLE_THREAD_MONITORING
+              value: "true"
             - name: ENABLE_PERFORMANCE_PROFILING
               value: "true"
             
-            # Development Sampling (100%)
-            - name: TRACE_SAMPLE_RATE
-              value: "1.0"
-            - name: METRICS_DEBUG_LOGGING
+            # Logging Configuration (Development - debug level)
+            - name: LOG_LEVEL
+              value: "DEBUG"
+            - name: ENABLE_REQUEST_RESPONSE_LOGGING
               value: "true"
-            - name: THREAD_METRICS_DEBUG_LOGGING
-              value: "true"
-            - name: THREAD_METRICS_UPDATE_INTERVAL
-              value: "1.0"
+            - name: LOG_SAMPLING_RATE
+              value: "1.0"    # 100% log sampling
             
-            # Faster export intervals for development
-            - name: OTEL_METRICS_EXPORT_INTERVAL_SECONDS
-              value: "5"
+            # Database Configuration (Development - with tracing)
+            - name: ENABLE_DATABASE_TRACING
+              value: "true"
+            - name: ENABLE_QUERY_LOGGING
+              value: "true"
+            - name: MAX_POOL_SIZE
+              value: "50"     # Larger pool for development
+            - name: MIN_POOL_SIZE
+              value: "10"
+            
+            # Performance Configuration (Development)
+            - name: VALIDATION_CACHE_SIZE
+              value: "1000"   # Smaller cache for development
           
+          # Development resource limits (more generous)
           resources:
             requests:
-              cpu: "50m"
-              memory: "64Mi"
+              cpu: "200m"
+              memory: "256Mi"
             limits:
               cpu: "500m"
               memory: "512Mi"
           
+          # Faster health checks for development
           livenessProbe:
-            httpGet:
-              path: /health
-              port: 8000
             initialDelaySeconds: 15
-            periodSeconds: 20
-            timeoutSeconds: 5
-            failureThreshold: 3
-          
+            periodSeconds: 15
           readinessProbe:
-            httpGet:
-              path: /health
-              port: 8000
             initialDelaySeconds: 5
             periodSeconds: 10
-            timeoutSeconds: 3
-            failureThreshold: 3
-          
           startupProbe:
-            httpGet:
-              path: /health
-              port: 8000
             initialDelaySeconds: 10
             periodSeconds: 5
-            timeoutSeconds: 3
-            failureThreshold: 12
+            failureThreshold: 10

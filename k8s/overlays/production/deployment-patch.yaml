@@ -3,82 +3,124 @@ kind: Deployment
 metadata:
   name: globeco-portfolio-service
 spec:
-  replicas: 3
-  strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxUnavailable: 1
-      maxSurge: 1
+  replicas: 3  # Three replicas for production high availability
   template:
+    metadata:
+      annotations:
+        deployment.environment: "production"
     spec:
       containers:
         - name: globeco-portfolio-service
+          # Production environment configuration (optimized for performance)
           env:
-            # Production Environment Configuration
+            # Environment Profile
+            - name: PORTFOLIO_SERVICE_ENV
+              value: "production"
             - name: ENVIRONMENT
               value: "production"
-            - name: LOG_LEVEL
-              value: "WARNING"
             
-            # Minimal Observability for Production Performance
-            - name: ENABLE_METRICS
-              value: "true"  # Only essential RED metrics
+            # Monitoring Configuration (Production - minimal observability)
             - name: ENABLE_TRACING
               value: "false"  # Disabled for maximum performance
-            - name: ENABLE_DATABASE_TRACING
-              value: "false"  # Disabled for maximum performance
-            - name: ENABLE_THREAD_METRICS
-              value: "false"  # Disabled for maximum performance
-            - name: ENABLE_REQUEST_LOGGING
-              value: "false"  # Disabled for maximum performance
-            - name: ENABLE_METRICS_MIDDLEWARE
-              value: "false"  # Disabled for maximum performance
-            - name: ENABLE_PERFORMANCE_PROFILING
-              value: "false"  # Disabled for maximum performance
-            
-            # Production Sampling (1% for critical traces only)
-            - name: TRACE_SAMPLE_RATE
-              value: "0.01"
-            - name: METRICS_DEBUG_LOGGING
-              value: "false"
-            - name: THREAD_METRICS_DEBUG_LOGGING
-              value: "false"
-            
-            # Optimized export intervals for production
+            - name: ENABLE_METRICS
+              value: "true"   # Essential metrics only
+            - name: METRICS_SAMPLE_RATE
+              value: "0.1"    # 10% sampling
             - name: OTEL_METRICS_EXPORT_INTERVAL_SECONDS
-              value: "60"
+              value: "60"     # 1 minute intervals
+            
+            # Middleware Configuration (Production - minimal middleware)
+            - name: ENABLE_REQUEST_LOGGING
+              value: "false"  # Disabled for performance
+            - name: ENABLE_METRICS_MIDDLEWARE
+              value: "false"  # Disabled for performance
+            - name: ENABLE_THREAD_MONITORING
+              value: "false"  # Disabled for performance
+            - name: ENABLE_PERFORMANCE_PROFILING
+              value: "false"  # Disabled for performance
+            
+            # Logging Configuration (Production - warning level)
+            - name: LOG_LEVEL
+              value: "WARNING"
+            - name: ENABLE_REQUEST_RESPONSE_LOGGING
+              value: "false"  # Disabled for performance
+            - name: LOG_SAMPLING_RATE
+              value: "0.1"    # 10% log sampling
+            
+            # Database Configuration (Production - optimized)
+            - name: ENABLE_DATABASE_TRACING
+              value: "false"  # Disabled for performance
+            - name: ENABLE_QUERY_LOGGING
+              value: "false"  # Disabled for performance
+            - name: MAX_POOL_SIZE
+              value: "20"     # Right-sized for production
+            - name: MIN_POOL_SIZE
+              value: "5"
+            
+            # Performance Configuration (Production - maximum cache)
+            - name: VALIDATION_CACHE_SIZE
+              value: "2000"   # Larger cache for production
           
+          # Production resource limits (right-sized per requirements)
           resources:
             requests:
-              cpu: "100m"      # As per design requirements
-              memory: "128Mi"  # As per design requirements
+              cpu: "100m"     # 100m as per requirements
+              memory: "128Mi" # 128Mi as per requirements
             limits:
-              cpu: "200m"      # As per design requirements
-              memory: "256Mi"  # As per design requirements
+              cpu: "200m"     # 200m as per requirements
+              memory: "256Mi" # 256Mi as per requirements
           
+          # Production health checks (optimized for <10ms response)
           livenessProbe:
-            httpGet:
-              path: /health
-              port: 8000
             initialDelaySeconds: 30
             periodSeconds: 30
             timeoutSeconds: 10
             failureThreshold: 3
-          
           readinessProbe:
-            httpGet:
-              path: /health
-              port: 8000
-            initialDelaySeconds: 15
+            initialDelaySeconds: 10
             periodSeconds: 15
             timeoutSeconds: 5
             failureThreshold: 3
-          
           startupProbe:
-            httpGet:
-              path: /health
-              port: 8000
-            initialDelaySeconds: 20
+            initialDelaySeconds: 15
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 15
+      
+      # Production-specific pod settings
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: app
+                    operator: In
+                    values:
+                      - globeco-portfolio-service
+              topologyKey: kubernetes.io/hostname
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: node-type
+                    operator: In
+                    values:
+                      - compute-optimized
+      
+      # Production tolerations
+      tolerations:
+        - key: node.kubernetes.io/not-ready
+          operator: Exists
+          effect: NoExecute
+          tolerationSeconds: 300
+        - key: node.kubernetes.io/unreachable
+          operator: Exists
+          effect: NoExecute
+          tolerationSeconds: 300
+        - key: node.kubernetes.io/memory-pressure
+          operator: Exists
+          effect: NoSchedule
+        - key: node.kubernetes.io/disk-pressure
+          operator: Exists
+          effect: NoSchedule

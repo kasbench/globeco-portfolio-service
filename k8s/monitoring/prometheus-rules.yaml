@@ -1,0 +1,263 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: globeco-portfolio-service-alerts
+  namespace: globeco
+  labels:
+    app: globeco-portfolio-service
+    component: portfolio-service
+    tier: backend
+    prometheus: kube-prometheus
+    role: alert-rules
+spec:
+  groups:
+    - name: portfolio-service.performance
+      interval: 30s
+      rules:
+        # Performance regression alert for bulk operations
+        - alert: PortfolioServiceBulkPerformanceRegression
+          expr: |
+            histogram_quantile(0.95, 
+              rate(http_request_duration_seconds_bucket{
+                service="globeco-portfolio-service",
+                endpoint="/api/fast/portfolios/bulk"
+              }[5m])
+            ) > 0.2
+          for: 2m
+          labels:
+            severity: warning
+            service: globeco-portfolio-service
+            component: performance
+          annotations:
+            summary: "Portfolio Service bulk operation performance regression"
+            description: "Bulk portfolio creation is taking longer than 200ms (P95: {{ $value }}s). Target: <200ms for 10 portfolios."
+            runbook_url: "https://docs.globeco.com/runbooks/portfolio-service-performance"
+        
+        # Individual operation performance alert
+        - alert: PortfolioServiceSingleOperationSlow
+          expr: |
+            histogram_quantile(0.95, 
+              rate(http_request_duration_seconds_bucket{
+                service="globeco-portfolio-service",
+                endpoint!~"/api/fast/portfolios/bulk"
+              }[5m])
+            ) > 0.05
+          for: 1m
+          labels:
+            severity: warning
+            service: globeco-portfolio-service
+            component: performance
+          annotations:
+            summary: "Portfolio Service individual operation performance regression"
+            description: "Individual portfolio operations are taking longer than 50ms (P95: {{ $value }}s). Target: <50ms."
+        
+        # High error rate alert
+        - alert: PortfolioServiceHighErrorRate
+          expr: |
+            (
+              rate(http_requests_total{
+                service="globeco-portfolio-service",
+                status_code=~"5.."
+              }[5m]) / 
+              rate(http_requests_total{
+                service="globeco-portfolio-service"
+              }[5m])
+            ) * 100 > 5
+          for: 2m
+          labels:
+            severity: critical
+            service: globeco-portfolio-service
+            component: reliability
+          annotations:
+            summary: "Portfolio Service high error rate"
+            description: "Error rate is {{ $value }}% over the last 5 minutes. Threshold: 5%."
+            runbook_url: "https://docs.globeco.com/runbooks/portfolio-service-errors"
+        
+        # Memory usage alert
+        - alert: PortfolioServiceHighMemoryUsage
+          expr: |
+            (
+              container_memory_usage_bytes{
+                pod=~".*globeco-portfolio-service.*"
+              } / 
+              container_spec_memory_limit_bytes{
+                pod=~".*globeco-portfolio-service.*"
+              }
+            ) * 100 > 90
+          for: 5m
+          labels:
+            severity: warning
+            service: globeco-portfolio-service
+            component: resources
+          annotations:
+            summary: "Portfolio Service high memory usage"
+            description: "Memory usage is {{ $value }}% of limit. Target: <256MB per pod."
+        
+        # CPU usage alert
+        - alert: PortfolioServiceHighCPUUsage
+          expr: |
+            (
+              rate(container_cpu_usage_seconds_total{
+                pod=~".*globeco-portfolio-service.*"
+              }[5m]) / 
+              container_spec_cpu_quota{
+                pod=~".*globeco-portfolio-service.*"
+              } * 
+              container_spec_cpu_period{
+                pod=~".*globeco-portfolio-service.*"
+              }
+            ) * 100 > 90
+          for: 5m
+          labels:
+            severity: warning
+            service: globeco-portfolio-service
+            component: resources
+          annotations:
+            summary: "Portfolio Service high CPU usage"
+            description: "CPU usage is {{ $value }}% of limit. Target: <200m per pod."
+        
+        # Health check failure alert
+        - alert: PortfolioServiceHealthCheckFailing
+          expr: |
+            up{service="globeco-portfolio-service"} == 0
+          for: 1m
+          labels:
+            severity: critical
+            service: globeco-portfolio-service
+            component: availability
+          annotations:
+            summary: "Portfolio Service health check failing"
+            description: "Health check has been failing for more than 1 minute."
+            runbook_url: "https://docs.globeco.com/runbooks/portfolio-service-health"
+        
+        # Health check response time alert
+        - alert: PortfolioServiceHealthCheckSlow
+          expr: |
+            histogram_quantile(0.95, 
+              rate(http_request_duration_seconds_bucket{
+                service="globeco-portfolio-service",
+                endpoint=~"/health/.*"
+              }[5m])
+            ) > 0.01
+          for: 2m
+          labels:
+            severity: warning
+            service: globeco-portfolio-service
+            component: performance
+          annotations:
+            summary: "Portfolio Service health check response time degraded"
+            description: "Health check response time is {{ $value }}s (P95). Target: <10ms."
+        
+        # Pod availability alert
+        - alert: PortfolioServiceLowAvailability
+          expr: |
+            (
+              kube_deployment_status_replicas_available{
+                deployment="globeco-portfolio-service"
+              } / 
+              kube_deployment_spec_replicas{
+                deployment="globeco-portfolio-service"
+              }
+            ) * 100 < 80
+          for: 2m
+          labels:
+            severity: critical
+            service: globeco-portfolio-service
+            component: availability
+          annotations:
+            summary: "Portfolio Service low pod availability"
+            description: "Only {{ $value }}% of pods are available. Minimum: 80%."
+        
+        # Circuit breaker open alert
+        - alert: PortfolioServiceCircuitBreakerOpen
+          expr: |
+            circuit_breaker_state{
+              service="globeco-portfolio-service"
+            } == 2
+          for: 1m
+          labels:
+            severity: warning
+            service: globeco-portfolio-service
+            component: reliability
+          annotations:
+            summary: "Portfolio Service circuit breaker open"
+            description: "Circuit breaker {{ $labels.circuit_name }} is open, indicating service degradation."
+            runbook_url: "https://docs.globeco.com/runbooks/portfolio-service-circuit-breaker"
+
+    - name: portfolio-service.database
+      interval: 30s
+      rules:
+        # Database connection pool exhaustion
+        - alert: PortfolioServiceDatabaseConnectionPoolExhausted
+          expr: |
+            (
+              mongodb_connection_pool_active{
+                service="globeco-portfolio-service"
+              } / 
+              mongodb_connection_pool_max{
+                service="globeco-portfolio-service"
+              }
+            ) * 100 > 90
+          for: 2m
+          labels:
+            severity: critical
+            service: globeco-portfolio-service
+            component: database
+          annotations:
+            summary: "Portfolio Service database connection pool near exhaustion"
+            description: "Database connection pool is {{ $value }}% utilized. Max: 20 connections."
+        
+        # Database operation latency
+        - alert: PortfolioServiceDatabaseOperationSlow
+          expr: |
+            histogram_quantile(0.95, 
+              rate(mongodb_operation_duration_seconds_bucket{
+                service="globeco-portfolio-service"
+              }[5m])
+            ) > 0.1
+          for: 2m
+          labels:
+            severity: warning
+            service: globeco-portfolio-service
+            component: database
+          annotations:
+            summary: "Portfolio Service database operations slow"
+            description: "Database operations are taking {{ $value }}s (P95). Investigate database performance."
+
+    - name: portfolio-service.business
+      interval: 60s
+      rules:
+        # Business metric: High portfolio creation rate (potential abuse)
+        - alert: PortfolioServiceHighCreationRate
+          expr: |
+            rate(portfolio_creations_total{
+              service="globeco-portfolio-service"
+            }[5m]) > 100
+          for: 5m
+          labels:
+            severity: warning
+            service: globeco-portfolio-service
+            component: business
+          annotations:
+            summary: "Portfolio Service unusually high creation rate"
+            description: "Portfolio creation rate is {{ $value }} per second. Investigate for potential abuse."
+        
+        # Business metric: Validation cache hit rate too low
+        - alert: PortfolioServiceLowCacheHitRate
+          expr: |
+            (
+              rate(validation_cache_hits_total{
+                service="globeco-portfolio-service"
+              }[10m]) / 
+              rate(validation_cache_requests_total{
+                service="globeco-portfolio-service"
+              }[10m])
+            ) * 100 < 70
+          for: 5m
+          labels:
+            severity: info
+            service: globeco-portfolio-service
+            component: performance
+          annotations:
+            summary: "Portfolio Service validation cache hit rate low"
+            description: "Cache hit rate is {{ $value }}%. Consider increasing cache size or investigating cache invalidation."

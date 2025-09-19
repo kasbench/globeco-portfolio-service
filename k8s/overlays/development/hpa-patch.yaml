@@ -4,30 +4,34 @@ metadata:
   name: globeco-portfolio-service-hpa
 spec:
   minReplicas: 1
-  maxReplicas: 3
-  metrics:
-  - type: Resource
-    resource:
-      name: cpu
-      target:
-        type: Utilization
-        averageUtilization: 80  # Higher threshold for development
-  - type: Resource
-    resource:
-      name: memory
-      target:
-        type: Utilization
-        averageUtilization: 85  # Higher threshold for development
+  maxReplicas: 3  # Limited scaling for development
+  
+  # More relaxed scaling for development
   behavior:
     scaleDown:
-      stabilizationWindowSeconds: 180  # Faster scaling for development
+      stabilizationWindowSeconds: 180  # 3 minutes
       policies:
-      - type: Percent
-        value: 100  # Allow aggressive scale down in dev
-        periodSeconds: 60
+        - type: Pods
+          value: 1
+          periodSeconds: 60
     scaleUp:
-      stabilizationWindowSeconds: 30   # Very fast scale up for development
+      stabilizationWindowSeconds: 30   # 30 seconds
       policies:
-      - type: Percent
-        value: 200  # Allow aggressive scale up in dev
-        periodSeconds: 15
+        - type: Pods
+          value: 1
+          periodSeconds: 30
+  
+  # Higher thresholds for development (less aggressive scaling)
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 80  # Scale when CPU > 80%
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 85  # Scale when memory > 85%

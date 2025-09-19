@@ -4,38 +4,42 @@ metadata:
   name: globeco-portfolio-service-hpa
 spec:
   minReplicas: 2
-  maxReplicas: 6
-  metrics:
-  - type: Resource
-    resource:
-      name: cpu
-      target:
-        type: Utilization
-        averageUtilization: 70  # Balanced threshold for staging
-  - type: Resource
-    resource:
-      name: memory
-      target:
-        type: Utilization
-        averageUtilization: 75  # Balanced threshold for staging
+  maxReplicas: 6  # Moderate scaling for staging
+  
+  # Balanced scaling for staging
   behavior:
     scaleDown:
-      stabilizationWindowSeconds: 240  # Moderate scaling for staging
+      stabilizationWindowSeconds: 240  # 4 minutes
       policies:
-      - type: Percent
-        value: 50
-        periodSeconds: 60
-      - type: Pods
-        value: 1
-        periodSeconds: 60
+        - type: Percent
+          value: 25          # Scale down by 25% max
+          periodSeconds: 60
+        - type: Pods
+          value: 1
+          periodSeconds: 60
       selectPolicy: Min
     scaleUp:
-      stabilizationWindowSeconds: 45   # Moderate scale up for staging
+      stabilizationWindowSeconds: 45   # 45 seconds
       policies:
-      - type: Percent
-        value: 100
-        periodSeconds: 30
-      - type: Pods
-        value: 2
-        periodSeconds: 30
+        - type: Percent
+          value: 50          # Scale up by 50% max
+          periodSeconds: 30
+        - type: Pods
+          value: 2
+          periodSeconds: 30
       selectPolicy: Max
+  
+  # Staging thresholds (between dev and prod)
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 75  # Scale when CPU > 75%
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 82  # Scale when memory > 82%

@@ -1,18 +1,61 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-namespace: globeco
+metadata:
+  name: globeco-portfolio-service-production
+  annotations:
+    config.kubernetes.io/local-config: "true"
 
+# Base resources
 resources:
-  - ../../base
+  - ../../base/deployment-optimized.yaml
+  - ../../base/hpa-optimized.yaml
 
+# Environment-specific patches
 patchesStrategicMerge:
   - deployment-patch.yaml
   - hpa-patch.yaml
 
+# Common labels for all resources
 commonLabels:
   environment: production
+  tier: backend
+  component: portfolio-service
 
+# Namespace
+namespace: globeco
+
+# No name prefix for production (clean names)
+
+# Image tag override for production
 images:
   - name: kasbench/globeco-portfolio-service
-    newTag: latest
+    newTag: v2.0.0
+
+# ConfigMap generator for production-specific config
+configMapGenerator:
+  - name: portfolio-service-config
+    literals:
+      - ENVIRONMENT=production
+      - LOG_LEVEL=WARNING
+      - ENABLE_TRACING=false
+      - ENABLE_METRICS_MIDDLEWARE=false
+      - METRICS_SAMPLE_RATE=0.1
+
+# Secret generator for production credentials (use external secret management in real production)
+secretGenerator:
+  - name: portfolio-service-secrets
+    literals:
+      - MONGODB_URI=mongodb://globeco-portfolio-service-mongodb:27017/portfolio
+
+# Resource transformers
+replicas:
+  - name: globeco-portfolio-service
+    count: 3
+
+# Annotations
+commonAnnotations:
+  deployment.environment: "production"
+  config.kubernetes.io/managed-by: "kustomize"
+  app.kubernetes.io/managed-by: "kustomize"
+  app.kubernetes.io/version: "v2.0.0"

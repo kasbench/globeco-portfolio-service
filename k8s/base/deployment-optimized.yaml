@@ -1,0 +1,326 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: globeco-portfolio-service
+  namespace: globeco
+  labels:
+    app: globeco-portfolio-service
+    version: v2.0.0
+    component: portfolio-service
+    tier: backend
+spec:
+  selector:
+    matchLabels:
+      app: globeco-portfolio-service
+  template:
+    metadata:
+      labels:
+        app: globeco-portfolio-service
+        version: v2.0.0
+        component: portfolio-service
+        tier: backend
+      annotations:
+        # Prometheus completely removed - using OpenTelemetry OTLP only
+        prometheus.io/scrape: "false"
+        # Deployment metadata
+        deployment.kubernetes.io/revision: "2"
+        config.kubernetes.io/checksum: "{{ .Values.configChecksum | default "unknown" }}"
+    spec:
+      # Security context for non-root execution
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      
+      # Service account for RBAC
+      serviceAccountName: globeco-portfolio-service
+      
+      # Termination grace period for graceful shutdown
+      terminationGracePeriodSeconds: 30
+      
+      # DNS configuration for faster resolution
+      dnsPolicy: ClusterFirst
+      dnsConfig:
+        options:
+          - name: ndots
+            value: "2"
+          - name: edns0
+      
+      containers:
+        - name: globeco-portfolio-service
+          image: kasbench/globeco-portfolio-service:v2.0.0
+          imagePullPolicy: Always
+          
+          ports:
+            - containerPort: 8000
+              name: http
+              protocol: TCP
+          
+          # Environment variables for optimized configuration
+          env:
+            # Environment Profile Configuration
+            - name: PORTFOLIO_SERVICE_ENV
+              value: "production"  # Will be overridden by overlays
+            - name: ENVIRONMENT
+              value: "production"  # Fallback
+            
+            # Kubernetes Pod Information
+            - name: MY_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: MY_POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: MY_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: MY_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: NODE_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            
+            # Database Configuration
+            - name: MONGODB_URI
+              value: "mongodb://globeco-portfolio-service-mongodb:27017"
+            - name: MONGODB_DB
+              value: "portfolio"
+            
+            # Service Configuration
+            - name: SERVICE_NAME
+              value: "globeco-portfolio-service"
+            - name: SERVICE_VERSION
+              value: "2.0.0"
+            - name: SERVICE_NAMESPACE
+              value: "globeco"
+            
+            # OpenTelemetry Configuration (OTLP only - Prometheus removed)
+            - name: OTEL_SERVICE_NAME
+              value: "globeco-portfolio-service"
+            - name: OTEL_SERVICE_VERSION
+              value: "2.0.0"
+            - name: OTEL_SERVICE_NAMESPACE
+              value: "globeco"
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: "service.name=globeco-portfolio-service,service.version=2.0.0,service.namespace=globeco,deployment.environment=production"
+            
+            # OTLP Export Configuration (hostport routing to node-local collector)
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://localhost:4317"  # Hostport routing
+            - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+              value: "http://localhost:4318/v1/traces"
+            - name: OTEL_EXPORTER_OTLP_METRICS_ENDPOINT
+              value: "http://localhost:4318/v1/metrics"
+            - name: OTEL_EXPORTER_OTLP_INSECURE
+              value: "true"
+            - name: OTEL_EXPORTER_OTLP_COMPRESSION
+              value: "gzip"
+            
+            # Monitoring Configuration (Production defaults)
+            - name: ENABLE_TRACING
+              value: "false"  # Disabled in production for performance
+            - name: ENABLE_METRICS
+              value: "true"   # Essential metrics only
+            - name: ENABLE_PROMETHEUS
+              value: "false"  # Completely removed
+            - name: METRICS_SAMPLE_RATE
+              value: "0.1"    # 10% sampling
+            - name: OTEL_METRICS_EXPORT_INTERVAL_SECONDS
+              value: "60"     # 1 minute intervals
+            - name: OTEL_METRICS_EXPORT_TIMEOUT_SECONDS
+              value: "30"
+            
+            # Middleware Configuration (Production - minimal)
+            - name: ENABLE_REQUEST_LOGGING
+              value: "false"
+            - name: ENABLE_METRICS_MIDDLEWARE
+              value: "false"
+            - name: ENABLE_THREAD_MONITORING
+              value: "false"
+            - name: ENABLE_PERFORMANCE_PROFILING
+              value: "false"
+            
+            # Logging Configuration (Production)
+            - name: LOG_LEVEL
+              value: "WARNING"
+            - name: ENABLE_STRUCTURED_LOGGING
+              value: "true"
+            - name: ENABLE_CORRELATION_IDS
+              value: "true"
+            - name: ENABLE_REQUEST_RESPONSE_LOGGING
+              value: "false"
+            - name: LOG_SAMPLING_RATE
+              value: "0.1"    # 10% log sampling
+            
+            # Database Configuration (Production optimized)
+            - name: ENABLE_DATABASE_TRACING
+              value: "false"  # Disabled for performance
+            - name: ENABLE_QUERY_LOGGING
+              value: "false"
+            - name: ENABLE_BULK_OPTIMIZATION
+              value: "true"
+            - name: MAX_POOL_SIZE
+              value: "20"
+            - name: MIN_POOL_SIZE
+              value: "5"
+            - name: CONNECTION_TIMEOUT
+              value: "30000"  # 30 seconds
+            
+            # Performance Configuration
+            - name: ENABLE_VALIDATION_CACHING
+              value: "true"
+            - name: VALIDATION_CACHE_SIZE
+              value: "2000"
+            - name: ENABLE_CIRCUIT_BREAKER
+              value: "true"
+            
+            # Feature Flags (Production)
+            - name: ENABLE_FAST_PATH_MIDDLEWARE
+              value: "true"
+            - name: ENABLE_CONNECTION_POOLING
+              value: "true"
+          
+          # Security context for container
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+            capabilities:
+              drop:
+                - ALL
+          
+          # Volume mounts for writable directories
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: var-tmp
+              mountPath: /var/tmp
+            - name: app-cache
+              mountPath: /app/.cache
+          
+          # Optimized health probes with <10ms response time targets
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 8000
+              scheme: HTTP
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+            successThreshold: 1
+          
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 8000
+              scheme: HTTP
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+            successThreshold: 1
+          
+          startupProbe:
+            httpGet:
+              path: /health/startup
+              port: 8000
+              scheme: HTTP
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 15
+            successThreshold: 1
+      
+      # Volumes for writable directories
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 100Mi
+        - name: var-tmp
+          emptyDir:
+            sizeLimit: 100Mi
+        - name: app-cache
+          emptyDir:
+            sizeLimit: 50Mi
+      
+      # Restart policy
+      restartPolicy: Always
+      
+      # Node selection and affinity
+      nodeSelector:
+        kubernetes.io/os: linux
+      
+      # Pod affinity for better distribution
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - globeco-portfolio-service
+                topologyKey: kubernetes.io/hostname
+      
+      # Tolerations for node taints
+      tolerations:
+        - key: node.kubernetes.io/not-ready
+          operator: Exists
+          effect: NoExecute
+          tolerationSeconds: 300
+        - key: node.kubernetes.io/unreachable
+          operator: Exists
+          effect: NoExecute
+          tolerationSeconds: 300
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: globeco-portfolio-service
+  namespace: globeco
+  labels:
+    app: globeco-portfolio-service
+    version: v2.0.0
+    component: portfolio-service
+    tier: backend
+  annotations:
+    # Service annotations for load balancer optimization
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    service.beta.kubernetes.io/aws-load-balancer-backend-protocol: "http"
+spec:
+  selector:
+    app: globeco-portfolio-service
+  ports:
+    - name: http
+      protocol: TCP
+      port: 8000
+      targetPort: 8000
+  type: ClusterIP
+  sessionAffinity: None
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: globeco-portfolio-service
+  namespace: globeco
+  labels:
+    app: globeco-portfolio-service
+    version: v2.0.0
+    component: portfolio-service
+automountServiceAccountToken: false

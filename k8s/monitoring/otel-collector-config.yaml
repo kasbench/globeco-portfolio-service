@@ -1,0 +1,322 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+  namespace: globeco
+  labels:
+    app: otel-collector
+    component: monitoring
+data:
+  otel-collector-config.yaml: |
+    # OpenTelemetry Collector configuration for Portfolio Service v2.0.0
+    # Receives OTLP data from Portfolio Service and exports to monitoring backends
+    
+    receivers:
+      # OTLP receiver for Portfolio Service metrics and traces
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+            cors:
+              allowed_origins:
+                - "*"
+              allowed_headers:
+                - "*"
+      
+      # Prometheus receiver for scraping other services (if needed)
+      prometheus:
+        config:
+          scrape_configs:
+            - job_name: 'otel-collector'
+              static_configs:
+                - targets: ['localhost:8888']
+    
+    processors:
+      # Batch processor for efficient export
+      batch:
+        timeout: 1s
+        send_batch_size: 1024
+        send_batch_max_size: 2048
+      
+      # Memory limiter to prevent OOM
+      memory_limiter:
+        limit_mib: 512
+        spike_limit_mib: 128
+        check_interval: 5s
+      
+      # Resource processor to add/modify resource attributes
+      resource:
+        attributes:
+          - key: service.namespace
+            value: globeco
+            action: upsert
+          - key: deployment.environment
+            from_attribute: environment
+            action: upsert
+          - key: k8s.cluster.name
+            value: globeco-cluster
+            action: upsert
+      
+      # Attributes processor for metrics
+      attributes/metrics:
+        actions:
+          - key: http.route
+            action: update
+            from_attribute: http.target
+          - key: http.method
+            action: update
+            from_attribute: method
+      
+      # Filter processor to remove sensitive data
+      filter/sensitive:
+        metrics:
+          exclude:
+            match_type: regexp
+            metric_names:
+              - ".*password.*"
+              - ".*secret.*"
+              - ".*token.*"
+        traces:
+          span:
+            - 'attributes["http.request.body"] != nil'
+            - 'attributes["http.response.body"] != nil'
+      
+      # Transform processor for Portfolio Service specific metrics
+      transform/portfolio:
+        metric_statements:
+          - context: metric
+            statements:
+              # Convert Portfolio Service specific metrics
+              - set(description, "Portfolio Service HTTP request duration") where name == "http_request_duration_seconds"
+              - set(description, "Portfolio Service HTTP requests total") where name == "http_requests_total"
+              - set(description, "Portfolio Service bulk operation duration") where name == "portfolio_bulk_operation_duration_seconds"
+              - set(description, "Portfolio Service validation cache hits") where name == "validation_cache_hits_total"
+              - set(description, "Portfolio Service circuit breaker state") where name == "circuit_breaker_state"
+    
+    exporters:
+      # Prometheus exporter for metrics
+      prometheus:
+        endpoint: "0.0.0.0:8889"
+        namespace: portfolio_service
+        const_labels:
+          service: globeco-portfolio-service
+        metric_expiration: 180m
+        resource_to_telemetry_conversion:
+          enabled: true
+      
+      # Jaeger exporter for traces (if tracing enabled)
+      jaeger:
+        endpoint: jaeger-collector:14250
+        tls:
+          insecure: true
+      
+      # OTLP exporter for forwarding to other collectors
+      otlp/backend:
+        endpoint: monitoring-backend:4317
+        tls:
+          insecure: true
+        compression: gzip
+        retry_on_failure:
+          enabled: true
+          initial_interval: 1s
+          max_interval: 30s
+          max_elapsed_time: 300s
+      
+      # Logging exporter for debugging
+      logging:
+        loglevel: info
+        sampling_initial: 2
+        sampling_thereafter: 500
+    
+    extensions:
+      # Health check extension
+      health_check:
+        endpoint: 0.0.0.0:13133
+        path: /health
+      
+      # Performance profiling
+      pprof:
+        endpoint: 0.0.0.0:1777
+      
+      # Metrics about the collector itself
+      zpages:
+        endpoint: 0.0.0.0:55679
+    
+    service:
+      extensions: [health_check, pprof, zpages]
+      
+      pipelines:
+        # Metrics pipeline
+        metrics:
+          receivers: [otlp, prometheus]
+          processors: [memory_limiter, batch, resource, attributes/metrics, filter/sensitive, transform/portfolio]
+          exporters: [prometheus, otlp/backend, logging]
+        
+        # Traces pipeline (if tracing enabled)
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, batch, resource, filter/sensitive]
+          exporters: [jaeger, otlp/backend]
+        
+        # Logs pipeline (if needed)
+        logs:
+          receivers: [otlp]
+          processors: [memory_limiter, batch, resource]
+          exporters: [otlp/backend, logging]
+      
+      # Telemetry configuration
+      telemetry:
+        logs:
+          level: info
+        metrics:
+          address: 0.0.0.0:8888
+          level: detailed
+
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: otel-collector
+  namespace: globeco
+  labels:
+    app: otel-collector
+    component: monitoring
+spec:
+  selector:
+    matchLabels:
+      app: otel-collector
+  template:
+    metadata:
+      labels:
+        app: otel-collector
+        component: monitoring
+    spec:
+      serviceAccountName: otel-collector
+      containers:
+        - name: otel-collector
+          image: otel/opentelemetry-collector-contrib:0.89.0
+          args:
+            - --config=/etc/otel-collector-config.yaml
+          ports:
+            - containerPort: 4317  # OTLP gRPC
+              hostPort: 4317
+              name: otlp-grpc
+            - containerPort: 4318  # OTLP HTTP
+              hostPort: 4318
+              name: otlp-http
+            - containerPort: 8889  # Prometheus metrics
+              name: prometheus
+            - containerPort: 13133 # Health check
+              name: health
+            - containerPort: 8888  # Collector metrics
+              name: metrics
+          env:
+            - name: MY_POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: MY_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 200m
+              memory: 512Mi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/otel-collector-config.yaml
+              subPath: otel-collector-config.yaml
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 13133
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 13133
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      volumes:
+        - name: config
+          configMap:
+            name: otel-collector-config
+      hostNetwork: true  # Required for hostPort
+      dnsPolicy: ClusterFirstWithHostNet
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: otel-collector
+  namespace: globeco
+  labels:
+    app: otel-collector
+    component: monitoring
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: otel-collector
+  labels:
+    app: otel-collector
+    component: monitoring
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "nodes", "services", "endpoints"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets"]
+    verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: otel-collector
+  labels:
+    app: otel-collector
+    component: monitoring
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: otel-collector
+subjects:
+  - kind: ServiceAccount
+    name: otel-collector
+    namespace: globeco
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector
+  namespace: globeco
+  labels:
+    app: otel-collector
+    component: monitoring
+spec:
+  selector:
+    app: otel-collector
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318
+    - name: prometheus
+      port: 8889
+      targetPort: 8889
+    - name: health
+      port: 13133
+      targetPort: 13133
+  type: ClusterIP

@@ -1,18 +1,61 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-namespace: globeco-dev
+metadata:
+  name: globeco-portfolio-service-development
+  annotations:
+    config.kubernetes.io/local-config: "true"
 
+# Base resources
 resources:
-  - ../../base
+  - ../../base/deployment-optimized.yaml
+  - ../../base/hpa-optimized.yaml
 
+# Environment-specific patches
 patchesStrategicMerge:
   - deployment-patch.yaml
   - hpa-patch.yaml
 
+# Common labels for all resources
 commonLabels:
   environment: development
+  tier: backend
+  component: portfolio-service
 
+# Namespace
+namespace: globeco-dev
+
+# Name prefix for development environment
+namePrefix: dev-
+
+# Image tag override for development
 images:
   - name: kasbench/globeco-portfolio-service
-    newTag: dev-latest
+    newTag: development
+
+# ConfigMap generator for development-specific config
+configMapGenerator:
+  - name: portfolio-service-config
+    literals:
+      - ENVIRONMENT=development
+      - LOG_LEVEL=DEBUG
+      - ENABLE_TRACING=true
+      - ENABLE_METRICS_MIDDLEWARE=true
+      - METRICS_SAMPLE_RATE=1.0
+
+# Secret generator for development credentials
+secretGenerator:
+  - name: portfolio-service-secrets
+    literals:
+      - MONGODB_URI=mongodb://dev-mongodb:27017/portfolio-dev
+
+# Resource transformers
+replicas:
+  - name: globeco-portfolio-service
+    count: 1
+
+# Annotations
+commonAnnotations:
+  deployment.environment: "development"
+  config.kubernetes.io/managed-by: "kustomize"
+  app.kubernetes.io/managed-by: "kustomize"

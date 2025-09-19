@@ -1,0 +1,32 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: globeco-portfolio-service
+  namespace: globeco
+  labels:
+    app: globeco-portfolio-service
+    component: portfolio-service
+    tier: backend
+spec:
+  selector:
+    matchLabels:
+      app: globeco-portfolio-service
+  endpoints:
+    # Note: No /metrics endpoint - using OpenTelemetry OTLP only
+    # This ServiceMonitor is for compatibility but won't scrape metrics
+    # since Prometheus is completely removed
+    - port: http
+      path: /health/metrics  # Health metrics endpoint for monitoring systems
+      interval: 30s
+      scrapeTimeout: 10s
+      honorLabels: true
+  namespaceSelector:
+    matchNames:
+      - globeco
+      - globeco-dev
+      - globeco-staging
+
+---
+# Note: This is a placeholder ServiceMonitor for compatibility
+# The actual monitoring is done via OpenTelemetry OTLP export
+# to the OpenTelemetry collector, not Prometheus scraping

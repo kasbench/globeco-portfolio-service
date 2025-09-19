@@ -1,0 +1,26 @@
+# Kustomize configuration for Portfolio Service
+# Defines how kustomize should handle transformations
+
+nameReference:
+  - kind: Service
+    version: v1
+    fieldSpecs:
+      - path: spec/rules/http/paths/backend/service/name
+        kind: Ingress
+      - path: spec/backend/service/name
+        kind: Ingress
+
+commonLabels:
+  - path: spec/selector/matchLabels
+    create: true
+    kind: Deployment
+  - path: spec/template/metadata/labels
+    create: true
+    kind: Deployment
+  - path: spec/selector
+    create: true
+    kind: Service
+
+varReference:
+  - path: spec/template/spec/containers/env/value
+    kind: Deployment
