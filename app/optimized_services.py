@@ -10,6 +10,8 @@ from app.schemas import PortfolioPostDTO
 from app.database import create_optimized_client, test_connection_health
 from app.config import settings
 from app.logging_config import get_logger
+from app.validation_cache import get_validation_cache
+from app.batch_validation import validate_portfolio_batch, ValidationResult
 from typing import List, Set, Optional
 from pymongo.errors import (
     DuplicateKeyError,
@@ -74,7 +76,7 @@ class OptimizedPortfolioService:
     @staticmethod
     def _validate_bulk_request_fast(portfolio_dtos: List[PortfolioPostDTO]) -> None:
         """
-        Fast validation for bulk request constraints.
+        Fast validation for bulk request constraints using cached validation.
         
         Args:
             portfolio_dtos: List of PortfolioPostDTO objects to validate
@@ -82,17 +84,25 @@ class OptimizedPortfolioService:
         Raises:
             ValueError: If validation fails with descriptive error message
         """
-        # Quick size checks
-        if not portfolio_dtos:
-            raise ValueError("Request must contain at least 1 portfolio")
+        # Use the new cached batch validation system
+        validation_result = validate_portfolio_batch(portfolio_dtos)
         
-        if len(portfolio_dtos) > 100:
-            raise ValueError("Request cannot contain more than 100 portfolios")
+        if not validation_result.is_valid:
+            # Combine all errors into a single message
+            error_message = validation_result.get_summary()
+            if validation_result.errors:
+                error_message += f": {'; '.join(validation_result.errors[:5])}"  # Limit to first 5 errors
+            raise ValueError(error_message)
+        
+        logger.debug(f"Fast validation completed in {validation_result.validation_time_ms:.2f}ms")
     
     @staticmethod
     def _check_duplicates_fast(portfolio_dtos: List[PortfolioPostDTO]) -> None:
         """
-        Fast duplicate checking using set-based approach.
+        Fast duplicate checking using cached validation (deprecated - use _validate_bulk_request_fast).
+        
+        This method is kept for backward compatibility but the validation
+        is now handled by the comprehensive batch validation system.
         
         Args:
             portfolio_dtos: List of PortfolioPostDTO objects to check
@@ -100,26 +110,18 @@ class OptimizedPortfolioService:
         Raises:
             ValueError: If duplicate names are found
         """
-        # Use set for O(n) duplicate detection instead of O(n²)
-        seen_names: Set[str] = set()
-        duplicates: List[str] = []
+        # This is now handled by _validate_bulk_request_fast, but kept for compatibility
+        from app.batch_validation import find_duplicates_fast
         
-        for dto in portfolio_dtos:
-            # Normalize name for comparison (strip whitespace, lowercase)
-            normalized_name = dto.name.strip().lower()
-            
-            if normalized_name in seen_names:
-                if normalized_name not in duplicates:  # Avoid duplicate duplicates
-                    duplicates.append(dto.name)
-            else:
-                seen_names.add(normalized_name)
+        names = [dto.name for dto in portfolio_dtos]
+        duplicates = find_duplicates_fast(names)
         
         if duplicates:
             raise ValueError(f"Duplicate portfolio names found: {', '.join(duplicates)}")
     
     async def _check_existing_names_fast(self, portfolio_names: List[str]) -> List[str]:
         """
-        Fast check for existing portfolio names in database.
+        Fast check for existing portfolio names in database with caching.
         
         Args:
             portfolio_names: List of portfolio names to check
@@ -130,19 +132,54 @@ class OptimizedPortfolioService:
         if not portfolio_names:
             return []
         
-        # Use $in query for efficient batch lookup
-        normalized_names = [name.strip() for name in portfolio_names]
+        cache = get_validation_cache()
+        existing_names = []
+        names_to_check = []
         
-        # Create case-insensitive regex patterns for all names at once
-        regex_patterns = [{"name": {"$regex": f"^{name}$", "$options": "i"}} for name in normalized_names]
+        # Check cache first for each name
+        for name in portfolio_names:
+            cached_exists = cache.get_cached_existence(name)
+            if cached_exists is not None:
+                if cached_exists:
+                    existing_names.append(name)
+            else:
+                names_to_check.append(name)
         
-        # Single query to check all names
-        existing_docs = await self._collection.find(
-            {"$or": regex_patterns},
-            {"name": 1, "_id": 0}  # Only return name field
-        ).to_list(length=len(portfolio_names))
+        # Query database for names not in cache
+        if names_to_check:
+            normalized_names = [name.strip() for name in names_to_check]
+            
+            # Create case-insensitive regex patterns for uncached names
+            regex_patterns = [{"name": {"$regex": f"^{name}$", "$options": "i"}} for name in normalized_names]
+            
+            # Single query to check uncached names
+            existing_docs = await self._collection.find(
+                {"$or": regex_patterns},
+                {"name": 1, "_id": 0}  # Only return name field
+            ).to_list(length=len(names_to_check))
+            
+            # Process results and update cache
+            found_names = {doc["name"] for doc in existing_docs}
+            
+            for name in names_to_check:
+                exists = any(
+                    existing_name.lower() == name.strip().lower() 
+                    for existing_name in found_names
+                )
+                
+                # Cache the result
+                cache.is_portfolio_exists_cached(name, exists)
+                
+                if exists:
+                    # Find the actual name from database (preserve original case)
+                    actual_name = next(
+                        (existing_name for existing_name in found_names 
+                         if existing_name.lower() == name.strip().lower()),
+                        name
+                    )
+                    existing_names.append(actual_name)
         
-        return [doc["name"] for doc in existing_docs]
+        return existing_names
     
     async def create_portfolios_bulk_fast(self, portfolio_dtos: List[PortfolioPostDTO]) -> List[Portfolio]:
         """
@@ -166,9 +203,8 @@ class OptimizedPortfolioService:
         # Minimal logging for performance - only log start and completion
         logger.info(f"Starting fast bulk creation: count={len(portfolio_dtos) if portfolio_dtos else 0}")
         
-        # Fast validation (no detailed logging)
+        # Fast validation using cached validation system
         self._validate_bulk_request_fast(portfolio_dtos)
-        self._check_duplicates_fast(portfolio_dtos)
         
         # Ensure connection
         await self._ensure_connection()

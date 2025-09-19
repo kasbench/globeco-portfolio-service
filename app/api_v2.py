@@ -132,16 +132,12 @@ async def search_portfolios(
 
 def _is_valid_name_format(name: str) -> bool:
     """
-    Validate portfolio name format:
+    Validate portfolio name format using cached validation:
     - 1-200 characters
     - Alphanumeric, spaces, hyphens, and underscores only
     """
-    if not name or len(name) > 200:
-        return False
-    
-    # Allow alphanumeric characters, spaces, hyphens, and underscores
-    pattern = r'^[a-zA-Z0-9\s\-_]+$'
-    return bool(re.match(pattern, name))
+    from app.validation_cache import is_valid_name_format
+    return is_valid_name_format(name)
 
 @router.post("/portfolios", response_model=List[PortfolioResponseDTO], status_code=201)
 async def create_portfolios_bulk(portfolios: List[PortfolioPostDTO]):
