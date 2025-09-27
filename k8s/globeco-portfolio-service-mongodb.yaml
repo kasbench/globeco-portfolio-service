@@ -33,11 +33,12 @@ spec:
       type: local
 ---
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: globeco-portfolio-service-mongodb
   namespace: globeco
 spec:
+  serviceName: globeco-portfolio-service-mongodb
   replicas: 1
   selector:
     matchLabels:
@@ -57,7 +58,7 @@ spec:
               mountPath: /data/db
           resources:
             requests:
-              cpu: "100m"
+              cpu: "300m"
               memory: "200Mi"
             limits:
               cpu: "500m"
