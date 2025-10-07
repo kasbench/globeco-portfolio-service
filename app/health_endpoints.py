@@ -173,10 +173,10 @@ async def readiness_probe() -> JSONResponse:
             db_start = time.perf_counter()
             client = create_optimized_client()
             
-            # Quick ping with very short timeout
+            # Quick ping with reasonable timeout
             is_healthy = await asyncio.wait_for(
-                test_connection_health(client, timeout=0.005),
-                timeout=0.008  # 8ms total timeout
+                test_connection_health(client, timeout=0.015),
+                timeout=0.020  # 20ms total timeout
             )
             
             db_time = round((time.perf_counter() - db_start) * 1000, 2)
@@ -199,7 +199,7 @@ async def readiness_probe() -> JSONResponse:
         except asyncio.TimeoutError:
             checks["database"] = {
                 "status": "timeout",
-                "response_time_ms": 8.0
+                "response_time_ms": 20.0
             }
             is_ready = False
         except Exception as e:
@@ -294,10 +294,10 @@ async def startup_probe() -> JSONResponse:
             db_start = time.perf_counter()
             client = create_optimized_client()
             
-            # Ping database with short timeout
+            # Ping database with reasonable timeout
             is_healthy = await asyncio.wait_for(
-                test_connection_health(client, timeout=0.008),
-                timeout=0.010  # 10ms total timeout for startup
+                test_connection_health(client, timeout=0.020),
+                timeout=0.025  # 25ms total timeout for startup
             )
             
             db_time = round((time.perf_counter() - db_start) * 1000, 2)

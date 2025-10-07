@@ -50,6 +50,7 @@ RUN uv pip install --no-cache-dir \
     opentelemetry-instrumentation-logging>=0.55b1 \
     opentelemetry-instrumentation-requests>=0.55b1 \
     opentelemetry-instrumentation-httpx>=0.55b1 \
+    psutil>=6.1.0 \
     motor>=3.7.1
 
 # Copy application code

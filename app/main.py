@@ -199,6 +199,16 @@ async def startup_sequence() -> None:
             otlp_endpoint=config_manager.get_monitoring_config().otlp_endpoint
         )
         
+        # Initialize OpenTelemetry metrics after meter provider is set up
+        if _unified_monitoring.is_metrics_enabled:
+            from app.monitoring import initialize_otel_metrics
+            otel_metrics_initialized = initialize_otel_metrics()
+            logger.info(
+                "OpenTelemetry metrics initialization completed",
+                success=otel_metrics_initialized,
+                metrics_enabled=_unified_monitoring.is_metrics_enabled
+            )
+        
         # 3. Initialize circuit breakers
         logger.info("Step 3: Initializing circuit breakers")
         await initialize_circuit_breakers()

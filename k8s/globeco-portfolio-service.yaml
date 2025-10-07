@@ -30,18 +30,20 @@ spec:
             - name: MONGODB_URI
               value: "mongodb://globeco-portfolio-service-mongodb:27017"
             - name: OTEL_METRICS_LOGGING_ENABLED
-              value: "false"
+              value: "true"
             - name: ENABLE_METRICS
-              value: "false"
+              value: "true"
             - name: METRICS_DEBUG_LOGGING
               value: "false"
             # Thread Metrics Configuration
             - name: ENABLE_THREAD_METRICS
-              value: "false"
+              value: "true"
             - name: THREAD_METRICS_UPDATE_INTERVAL
               value: "1.0"
             - name: THREAD_METRICS_DEBUG_LOGGING
               value: "false"
+            - name: ENABLE_METRICS_MIDDLEWARE
+              value: "true"
             # Service Namespace Label
             - name: SERVICE_NAMESPACE
               value: "globeco"
@@ -79,6 +81,16 @@ spec:
                   fieldPath: spec.nodeName
             - name: LOG_LEVEL
               value: "INFO"
+
+
+            - name: MAX_POOL_SIZE
+              value: "50"     # Larger pool for development
+            - name: MIN_POOL_SIZE
+              value: "10"
+            
+            
+
+
           resources:
             requests:
               cpu: "600m"

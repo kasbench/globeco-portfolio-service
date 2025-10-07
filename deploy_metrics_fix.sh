@@ -1,37 +1,44 @@
 #!/bin/bash
 
-# Deploy the metrics initialization fix
-# This script rebuilds and redeploys the service with the corrected OpenTelemetry metrics initialization
+# Deploy Python runtime metrics enhancement
+# This script adds Python runtime metrics (equivalent to Prometheus python_* metrics)
 
 set -e
 
-echo "🔧 Deploying OpenTelemetry metrics initialization fix..."
+echo "🔧 Deploying Python runtime metrics enhancement..."
 
-# Build the new image
-echo "📦 Building Docker image with metrics fix..."
+# Build and push the updated image
+echo "📦 Building updated Docker image..."
 docker build -t kasbench/globeco-portfolio-service:latest .
 
-# Push to registry (if needed)
-echo "📤 Pushing image to registry..."
+echo "🚀 Pushing image to registry..."
 docker push kasbench/globeco-portfolio-service:latest
 
-# Restart the deployment to pick up the new image
-echo "🔄 Restarting deployment..."
-kubectl rollout restart deployment/globeco-portfolio-service -n globeco
+# Apply the deployment
+echo "🎯 Applying Kubernetes deployment..."
+kubectl apply -f k8s/globeco-portfolio-service.yaml
 
 # Wait for rollout to complete
-echo "⏳ Waiting for rollout to complete..."
+echo "⏳ Waiting for deployment rollout..."
 kubectl rollout status deployment/globeco-portfolio-service -n globeco --timeout=300s
 
-echo "✅ Deployment complete!"
-
-# Show pod status
-echo "📊 Current pod status:"
+# Check pod status
+echo "📊 Checking pod status..."
 kubectl get pods -n globeco -l app=globeco-portfolio-service
 
+echo "✅ Deployment completed successfully!"
+
+# Show recent logs to verify the fix
+echo "📋 Recent logs (last 50 lines):"
+kubectl logs -n globeco -l app=globeco-portfolio-service --tail=50
+
 echo ""
-echo "🔍 To verify the fix:"
-echo "1. Check pod logs: kubectl logs -n globeco -l app=globeco-portfolio-service --tail=50"
-echo "2. Look for 'OpenTelemetry metrics initialization completed' message"
-echo "3. Test metrics flow: ./test_otel_only_metrics.sh"
-echo "4. Check Prometheus for metrics without otel_ prefix"
+echo "🔍 To monitor metrics, check:"
+echo "1. Pod logs: kubectl logs -n globeco -l app=globeco-portfolio-service -f"
+echo "2. Prometheus metrics: Check for these metrics:"
+echo "   - otel_http_* (HTTP request metrics)"
+echo "   - python_* (Python runtime info)"
+echo "   - process_* (Process metrics)"
+echo "   - python_gc_* (Garbage collection)"
+echo "   - python_threads (Thread count)"
+echo "3. Service health: curl http://service-ip:8000/health"

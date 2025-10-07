@@ -24,7 +24,7 @@ spec:
         prometheus.io/scrape: "false"
         # Deployment metadata
         deployment.kubernetes.io/revision: "2"
-        config.kubernetes.io/checksum: "{{ .Values.configChecksum | default "unknown" }}"
+        config.kubernetes.io/checksum: "unknown"
     spec:
       # Security context for non-root execution
       securityContext:
@@ -51,7 +51,7 @@ spec:
       
       containers:
         - name: globeco-portfolio-service
-          image: kasbench/globeco-portfolio-service:v2.0.0
+          image: kasbench/globeco-portfolio-service:latest
           imagePullPolicy: Always
           
           ports:

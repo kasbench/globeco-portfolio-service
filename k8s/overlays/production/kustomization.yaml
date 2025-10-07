@@ -8,19 +8,25 @@ metadata:
 
 # Base resources
 resources:
-  - ../../base/deployment-optimized.yaml
-  - ../../base/hpa-optimized.yaml
+  - ../../base
 
 # Environment-specific patches
-patchesStrategicMerge:
-  - deployment-patch.yaml
-  - hpa-patch.yaml
+patches:
+  - path: deployment-patch.yaml
+    target:
+      kind: Deployment
+      name: globeco-portfolio-service
+  - path: hpa-patch.yaml
+    target:
+      kind: HorizontalPodAutoscaler
+      name: globeco-portfolio-service
 
-# Common labels for all resources
-commonLabels:
-  environment: production
-  tier: backend
-  component: portfolio-service
+# Labels for all resources
+labels:
+  - pairs:
+      environment: production
+      tier: backend
+      component: portfolio-service
 
 # Namespace
 namespace: globeco

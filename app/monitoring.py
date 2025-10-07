@@ -2817,30 +2817,7 @@ class EnhancedHTTPMetricsMiddleware(BaseHTTPMiddleware):
                 exc_info=True,
             )
 
-        # Record Prometheus histogram metrics with error handling
-        try:
-            HTTP_REQUEST_DURATION.labels(
-                method=method, path=path, status=status
-            ).observe(duration_ms)
-            if self.debug_logging:
-                logger.debug(
-                    "Successfully recorded Prometheus HTTP request duration histogram",
-                    method=method,
-                    path=path,
-                    status=status,
-                    duration_ms=duration_ms,
-                )
-        except Exception as e:
-            logger.error(
-                "Failed to record Prometheus HTTP request duration histogram",
-                error=str(e),
-                error_type=type(e).__name__,
-                method=method,
-                path=path,
-                status=status,
-                duration_ms=duration_ms,
-                exc_info=True,
-            )
+
 
         # Record OpenTelemetry histogram metrics with error handling
         try:

@@ -70,6 +70,7 @@ class UnifiedMonitoring:
         self._meter = None
         self._sampler: Optional[ConfigurableSampler] = None
         self._async_collector: Optional[AsyncMetricsCollector] = None
+        self._runtime_metrics = None
         self._initialized = False
         
         # OTLP configuration
@@ -280,6 +281,25 @@ class UnifiedMonitoring:
             )
             raise
     
+    def _setup_runtime_metrics(self) -> None:
+        """Setup Python runtime metrics collection."""
+        if not self._config.enable_metrics:
+            return
+        
+        try:
+            from app.python_runtime_metrics import initialize_python_runtime_metrics
+            
+            self._runtime_metrics = initialize_python_runtime_metrics(self._meter)
+            
+            self._logger.info("Python runtime metrics initialized successfully")
+            
+        except Exception as e:
+            self._logger.warning(
+                f"Failed to setup Python runtime metrics: error={str(e)}, error_type={type(e).__name__}",
+                exc_info=True
+            )
+            # Don't raise - runtime metrics are nice to have but not critical
+    
     def initialize(self) -> bool:
         """
         Initialize the unified monitoring system.
@@ -302,6 +322,9 @@ class UnifiedMonitoring:
             # Setup meter if enabled
             if self._config.enable_metrics:
                 self._setup_meter()
+                
+                # Initialize Python runtime metrics
+                self._setup_runtime_metrics()
                 
                 # Start async metrics collector
                 if self._async_collector:
@@ -342,6 +365,15 @@ class UnifiedMonitoring:
             
             # Instrument logging
             LoggingInstrumentor().instrument(set_logging_format=True)
+            
+            # Instrument system/runtime metrics (equivalent to Prometheus python_* metrics)
+            if self._config.enable_metrics:
+                try:
+                    from opentelemetry.instrumentation.system_metrics import SystemMetricsInstrumentor
+                    SystemMetricsInstrumentor().instrument()
+                    self._logger.info("System metrics instrumentation enabled (Python runtime metrics)")
+                except ImportError:
+                    self._logger.info("System metrics instrumentation not available, using custom runtime metrics")
             
             self._logger.debug("Library instrumentation completed")
             
@@ -384,6 +416,18 @@ class UnifiedMonitoring:
             except Exception as e:
                 self._logger.error(
                     f"Failed to start async metrics collector: error={str(e)}, error_type={type(e).__name__}",
+                    exc_info=True
+                )
+        
+        # Start runtime metrics collection task
+        if self._runtime_metrics:
+            try:
+                import asyncio
+                asyncio.create_task(self._runtime_metrics_task())
+                self._logger.info("Python runtime metrics collection task started")
+            except Exception as e:
+                self._logger.warning(
+                    f"Failed to start runtime metrics task: error={str(e)}, error_type={type(e).__name__}",
                     exc_info=True
                 )
     
@@ -468,6 +512,22 @@ class UnifiedMonitoring:
                 "environment": get_config_manager().current_environment,
             }
         }
+    
+    async def _runtime_metrics_task(self) -> None:
+        """Background task to collect Python runtime metrics periodically."""
+        import asyncio
+        
+        while self._initialized and self._runtime_metrics:
+            try:
+                self._runtime_metrics.collect_metrics()
+                await asyncio.sleep(30)  # Collect every 30 seconds
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                self._logger.warning(
+                    f"Runtime metrics collection failed: error={str(e)}, error_type={type(e).__name__}"
+                )
+                await asyncio.sleep(30)  # Continue after error
     
     def shutdown(self) -> None:
         """Shutdown monitoring system and flush pending data."""

@@ -11,12 +11,13 @@ resources:
   - deployment-optimized.yaml
   - hpa-optimized.yaml
 
-# Common labels applied to all resources
-commonLabels:
-  app: globeco-portfolio-service
-  component: portfolio-service
-  tier: backend
-  managed-by: kustomize
+# Labels applied to all resources
+labels:
+  - pairs:
+      app: globeco-portfolio-service
+      component: portfolio-service
+      tier: backend
+      managed-by: kustomize
 
 # Common annotations
 commonAnnotations:
