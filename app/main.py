@@ -70,8 +70,8 @@ async def initialize_database() -> AsyncIOMotorClient:
             document_models=[Portfolio],
         )
         
-        # Create database indexes for optimal performance
-        await create_indexes()
+        # Create database indexes using the same client
+        await create_indexes(_database_client)
         
         logger.info(
             "Database initialization completed successfully",

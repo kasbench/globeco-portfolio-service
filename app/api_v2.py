@@ -153,7 +153,7 @@ async def create_portfolios_bulk(portfolios: List[PortfolioPostDTO]):
     - Validation errors on invalid input (HTTP 400)
     - Server errors on database failures (HTTP 500)
     """
-    logger.info(
+    logger.debug(
         "API v2: Bulk portfolio creation requested",
         endpoint="/api/v2/portfolios",
         method="POST",
@@ -171,7 +171,7 @@ async def create_portfolios_bulk(portfolios: List[PortfolioPostDTO]):
                 "version": portfolio.version
             })
         
-        logger.info(
+        logger.debug(
             "API v2: Request details for bulk portfolio creation",
             endpoint="/api/v2/portfolios",
             method="POST",
@@ -210,7 +210,7 @@ async def create_portfolios_bulk(portfolios: List[PortfolioPostDTO]):
         # Convert to response DTOs
         response_dtos = [PortfolioService.portfolio_to_dto(p) for p in created_portfolios]
         
-        logger.info(
+        logger.debug(
             "API v2: Bulk portfolio creation completed successfully",
             endpoint="/api/v2/portfolios",
             method="POST",

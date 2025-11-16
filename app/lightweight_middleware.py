@@ -31,7 +31,7 @@ class LightweightPerformanceMiddleware(BaseHTTPMiddleware):
             
             # Log start with minimal details
             if not performance_config.MINIMAL_LOGGING_FOR_BULK:
-                logger.info(
+                logger.debug(
                     "Bulk operation started",
                     method=request.method,
                     path=request.url.path
@@ -44,7 +44,7 @@ class LightweightPerformanceMiddleware(BaseHTTPMiddleware):
             duration_ms = (time.time() - start_time) * 1000
             
             # Log completion with timing
-            logger.info(
+            logger.debug(
                 "Bulk operation completed",
                 method=request.method,
                 path=request.url.path,

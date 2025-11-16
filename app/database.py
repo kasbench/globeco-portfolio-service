@@ -149,17 +149,14 @@ async def get_connection_pool_stats(client: AsyncIOMotorClient) -> dict:
             "connection_configured": False
         }
 
-async def create_indexes():
-    """Create MongoDB indexes for optimal search performance using optimized client"""
-    client = None
+async def create_indexes(client: AsyncIOMotorClient):
+    """
+    Create MongoDB indexes for optimal search performance using provided client.
+    
+    Args:
+        client: Existing MongoDB client to use for index creation
+    """
     try:
-        # Use optimized client for index creation
-        client = create_optimized_client()
-        
-        # Test connection health before proceeding
-        if not await test_connection_health(client):
-            raise ConnectionFailure("MongoDB connection health check failed")
-        
         db = client[settings.mongodb_db]
         portfolio_collection = db.portfolio
         
@@ -179,14 +176,8 @@ async def create_indexes():
         )
         logger.info("Created compound index on name and dateCreated fields")
         
-        # Log connection pool stats for monitoring
-        pool_stats = await get_connection_pool_stats(client)
-        logger.info(f"Index creation completed with connection stats: {pool_stats}")
+        logger.info("Index creation completed successfully")
         
     except Exception as e:
         logger.error(f"Error creating indexes: {e}")
-        raise
-    finally:
-        if client:
-            client.close()
-            logger.debug("MongoDB client closed after index creation") 
+        raise 

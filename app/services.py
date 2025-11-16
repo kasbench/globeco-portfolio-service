@@ -3,7 +3,6 @@ from app.schemas import PortfolioResponseDTO, PaginationDTO, PortfolioSearchResp
 from app.tracing import trace_database_call
 from app.logging_config import get_logger
 from app.database import create_optimized_client, test_connection_health
-from app.database_init import ensure_database_initialized
 from app.config import settings
 from app.environment_config import get_config_manager
 from bson import ObjectId
@@ -388,7 +387,7 @@ class PortfolioService:
                 result = await operation()
                 
                 if attempt > 0:  # Log successful retry
-                    logger.info(
+                    logger.debug(
                         "Database operation succeeded after retry",
                         operation=operation_name,
                         attempt=attempt + 1,
@@ -435,7 +434,7 @@ class PortfolioService:
                 # Wait before retrying (exponential backoff)
                 if attempt < max_retries:
                     delay = delays[min(attempt, len(delays) - 1)]
-                    logger.info(
+                    logger.debug(
                         "Retrying database operation after delay",
                         operation=operation_name,
                         attempt=attempt + 1,
@@ -519,10 +518,6 @@ class PortfolioService:
     @staticmethod
     async def get_all_portfolios() -> List[Portfolio]:
         """Get all portfolios for v1 API (backward compatibility)"""
-        # Ensure database is initialized (important for testing)
-        if not await ensure_database_initialized():
-            raise RuntimeError("Failed to initialize database connection")
-        
         logger.debug("Fetching all portfolios", operation="get_all_portfolios")
         portfolios = await trace_database_call(
             "find_all",
@@ -649,10 +644,6 @@ class PortfolioService:
         Search portfolios with pagination for v2 API
         Returns tuple of (portfolios, total_count)
         """
-        # Ensure database is initialized (important for testing)
-        if not await ensure_database_initialized():
-            raise RuntimeError("Failed to initialize database connection")
-        
         logger.debug("Searching portfolios", 
                    operation="search_portfolios",
                    name=name,
@@ -839,12 +830,8 @@ class PortfolioService:
             ValueError: If validation fails (empty request, oversized request, duplicates)
             Exception: If the bulk operation fails after all retries
         """
-        # Ensure database is initialized (important for testing)
-        if not await ensure_database_initialized():
-            raise RuntimeError("Failed to initialize database connection")
-        
         # Minimal logging for performance
-        logger.info(
+        logger.debug(
             "Starting bulk portfolio creation",
             operation="create_portfolios_bulk",
             portfolio_count=len(portfolio_dtos) if portfolio_dtos else 0
@@ -874,7 +861,7 @@ class PortfolioService:
                 insert_result = await Portfolio.insert_many(portfolios)
                 
                 # insert_many modifies the original portfolio objects with their new IDs
-                logger.info(
+                logger.debug(
                     "Bulk operation completed",
                     operation="bulk_create_operation",
                     portfolio_count=len(portfolios),
@@ -900,7 +887,7 @@ class PortfolioService:
                 operation_name="bulk_portfolio_creation"
             )
             
-            logger.info(
+            logger.debug(
                 "Bulk portfolio creation completed successfully",
                 operation="create_portfolios_bulk",
                 portfolio_count=len(result)

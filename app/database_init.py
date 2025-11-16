@@ -30,10 +30,29 @@ async def ensure_database_initialized() -> bool:
     This function can be called multiple times safely and will only initialize once.
     It's designed to work both in normal application startup and during testing.
     
+    NOTE: In production, the database is initialized during application startup
+    via the FastAPI lifespan. This function is primarily for testing scenarios
+    where the lifespan events don't run.
+    
     Returns:
         True if initialization was successful, False otherwise
     """
     global _database_initialized, _database_client
+    
+    # First check if Beanie is already initialized (by main app startup)
+    try:
+        # Try a simple database operation to check if Beanie is working
+        from app.models import Portfolio
+        # If we can access the motor collection, Beanie is initialized
+        if Portfolio.get_motor_collection() is not None:
+            # Beanie is already initialized by the main application
+            if not _database_initialized:
+                logger.debug("Database already initialized by application startup, skipping duplicate initialization")
+                _database_initialized = True
+            return True
+    except Exception:
+        # Beanie not initialized yet, continue with initialization
+        pass
     
     if _database_initialized:
         return True
@@ -43,8 +62,18 @@ async def ensure_database_initialized() -> bool:
         if _database_initialized:
             return True
         
+        # Check again if Beanie was initialized while we were waiting for the lock
         try:
-            logger.info("Initializing database connection and Beanie ODM")
+            from app.models import Portfolio
+            if Portfolio.get_motor_collection() is not None:
+                logger.debug("Database was initialized while waiting for lock, skipping duplicate initialization")
+                _database_initialized = True
+                return True
+        except Exception:
+            pass
+        
+        try:
+            logger.info("Initializing database connection and Beanie ODM (fallback for testing)")
             
             # Create optimized MongoDB client
             _database_client = create_optimized_client()
@@ -55,8 +84,8 @@ async def ensure_database_initialized() -> bool:
                 document_models=[Portfolio],
             )
             
-            # Create database indexes for optimal performance
-            await create_indexes()
+            # Create database indexes using the same client
+            await create_indexes(_database_client)
             
             _database_initialized = True
             
