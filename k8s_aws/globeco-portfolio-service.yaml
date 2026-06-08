@@ -1,0 +1,129 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: globeco-portfolio-service
+  namespace: globeco
+  labels:
+    app: globeco-portfolio-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: globeco-portfolio-service
+  template:
+    metadata:
+      labels:
+        app: globeco-portfolio-service
+    spec:
+      containers:
+        - name: globeco-portfolio-service
+          image: kasbench/globeco-portfolio-service:1.0.1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          env:
+            # Inject the node IP from the Downward API
+            - name: NODE_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            - name: MONGODB_URI
+              value: "mongodb://globeco-portfolio-service-mongodb:27017"
+            - name: OTEL_METRICS_LOGGING_ENABLED
+              value: "true"
+            - name: ENABLE_METRICS
+              value: "true"
+            - name: METRICS_DEBUG_LOGGING
+              value: "false"
+            # Thread Metrics Configuration
+            - name: ENABLE_THREAD_METRICS
+              value: "true"
+            - name: THREAD_METRICS_UPDATE_INTERVAL
+              value: "1.0"
+            - name: THREAD_METRICS_DEBUG_LOGGING
+              value: "false"
+            - name: ENABLE_METRICS_MIDDLEWARE
+              value: "true"
+            # Service Namespace Label
+            - name: SERVICE_NAMESPACE
+              value: "globeco"
+            # OpenTelemetry Metrics Export Configuration
+            - name: OTEL_METRICS_EXPORT_INTERVAL_SECONDS
+              value: "5"
+            - name: OTEL_METRICS_EXPORT_TIMEOUT_SECONDS
+              value: "10"
+            # OpenTelemetry Configuration
+            - name: OTEL_SERVICE_NAME
+              value: "globeco-portfolio-service"
+            - name: OTEL_SERVICE_NAMESPACE
+              value: "globeco"
+            # Use NODE_IP for daemonset + hostport routing
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "$(NODE_IP):4317"
+            - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+              value: "http://$(NODE_IP):4318/v1/traces"
+            - name: OTEL_EXPORTER_OTLP_METRICS_ENDPOINT
+              value: "http://$(NODE_IP):4318/v1/metrics"
+            - name: OTEL_EXPORTER_OTLP_INSECURE
+              value: "true"
+            # Pod information for k8sattributes processor
+            - name: MY_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: MY_POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: MY_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: LOG_LEVEL
+              value: "INFO"
+            - name: MAX_POOL_SIZE
+              value: "50"     # Larger pool for development
+            - name: MIN_POOL_SIZE
+              value: "10"
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "300Mi"
+            limits:
+              cpu: "200m"
+              memory: "300Mi"
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 240
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 5
+          startupProbe:
+            httpGet:
+              path: /
+              port: 8000
+            failureThreshold: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: globeco-portfolio-service
+  namespace: globeco
+spec:
+  selector:
+    app: globeco-portfolio-service
+  ports:
+    - protocol: TCP
+      port: 8000
+      targetPort: 8000
+  type: ClusterIP 
