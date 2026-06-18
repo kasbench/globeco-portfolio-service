@@ -45,7 +45,7 @@ spec:
         app: globeco-portfolio-service-mongodb
     spec:
       containers:
-        - name: mongodb
+        - name: globeco-portfolio-service-mongodb
           image: mongo:6.0
           ports:
             - containerPort: 27017
