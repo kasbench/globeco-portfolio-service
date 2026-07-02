@@ -65,4 +65,23 @@ async def test_portfolio_crud(mongodb_container):
 
         # Get after delete
         resp = await ac.get(f"/api/v1/portfolio/{portfolio_id}")
-        assert resp.status_code == 404 
+        assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_v1_invalid_portfolio_id_returns_not_found():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get("/api/v1/portfolio/not-an-object-id")
+        assert resp.status_code == 404
+
+        put_data = {
+            "portfolioId": "not-an-object-id",
+            "name": "Updated Portfolio",
+            "version": 1
+        }
+        resp = await ac.put("/api/v1/portfolio/not-an-object-id", json=put_data)
+        assert resp.status_code == 404
+
+        resp = await ac.delete("/api/v1/portfolio/not-an-object-id?version=1")
+        assert resp.status_code == 404
