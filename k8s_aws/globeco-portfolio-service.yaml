@@ -92,27 +92,29 @@ spec:
             limits:
               cpu: "200m"
               memory: "300Mi"
-          livenessProbe:
+           livenessProbe:
             httpGet:
               path: /
               port: 8000
-            initialDelaySeconds: 30
-            periodSeconds: 10
-            timeoutSeconds: 240
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 3
           readinessProbe:
             httpGet:
               path: /
               port: 8000
-            initialDelaySeconds: 10
             periodSeconds: 5
             timeoutSeconds: 5
+            failureThreshold: 3
           startupProbe:
             httpGet:
               path: /
               port: 8000
             failureThreshold: 30
-            periodSeconds: 10
+            periodSeconds: 2
             timeoutSeconds: 5
+            failureThreshold: 30
+            
 ---
 apiVersion: v1
 kind: Service

@@ -87,10 +87,6 @@ spec:
               value: "50"     # Larger pool for development
             - name: MIN_POOL_SIZE
               value: "10"
-            
-            
-
-
           resources:
             requests:
               cpu: "600m"
@@ -102,23 +98,25 @@ spec:
             httpGet:
               path: /
               port: 8000
-            initialDelaySeconds: 30
-            periodSeconds: 10
-            timeoutSeconds: 240
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 3
           readinessProbe:
             httpGet:
               path: /
               port: 8000
-            initialDelaySeconds: 10
             periodSeconds: 5
             timeoutSeconds: 5
+            failureThreshold: 3
           startupProbe:
             httpGet:
               path: /
               port: 8000
             failureThreshold: 30
-            periodSeconds: 10
+            periodSeconds: 2
             timeoutSeconds: 5
+            failureThreshold: 30
+
 ---
 apiVersion: v1
 kind: Service
