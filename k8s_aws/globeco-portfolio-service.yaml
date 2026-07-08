@@ -92,7 +92,7 @@ spec:
             limits:
               cpu: "200m"
               memory: "300Mi"
-           livenessProbe:
+          livenessProbe:
             httpGet:
               path: /
               port: 8000
