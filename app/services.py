@@ -19,7 +19,7 @@ from pymongo.errors import (
 )
 from beanie import WriteRules
 from datetime import datetime, UTC
-from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import AsyncMongoClient
 import re
 import math
 import asyncio
@@ -38,7 +38,7 @@ class StreamlinedPortfolioService:
     
     def __init__(self):
         """Initialize streamlined service with direct database access."""
-        self._client: Optional[AsyncIOMotorClient] = None
+        self._client: Optional[AsyncMongoClient] = None
         self._db = None
         self._collection = None
         self._config_manager = None

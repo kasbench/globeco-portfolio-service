@@ -5,7 +5,7 @@ Minimal FastAPI application without OpenTelemetry overhead for performance testi
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from beanie import init_beanie
-from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import AsyncMongoClient
 from app.config import settings
 from app.models import Portfolio
 from app import api_v1, api_v2
@@ -20,7 +20,7 @@ logger = setup_logging(log_level="WARNING")  # Minimal logging
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Minimal lifespan with just database setup"""
-    client = AsyncIOMotorClient(settings.mongodb_uri)
+    client = AsyncMongoClient(settings.mongodb_uri)
     await init_beanie(
         database=client[settings.mongodb_db],
         document_models=[Portfolio],

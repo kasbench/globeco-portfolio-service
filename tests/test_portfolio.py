@@ -3,14 +3,14 @@ from httpx import AsyncClient, ASGITransport
 from app.main import app
 from app.models import Portfolio
 from app.config import settings
-from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import AsyncMongoClient
 from beanie import init_beanie
 import asyncio
 
 @pytest.mark.asyncio
 async def test_portfolio_crud(mongodb_container):
     # Explicitly initialize Beanie with the test MongoDB
-    client = AsyncIOMotorClient(settings.mongodb_uri)
+    client = AsyncMongoClient(settings.mongodb_uri)
     await init_beanie(database=client[settings.mongodb_db], document_models=[Portfolio])
 
     transport = ASGITransport(app=app)

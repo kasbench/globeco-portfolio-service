@@ -10,7 +10,7 @@ from app.models import Portfolio
 from app.services import PortfolioService
 from app.schemas import PortfolioPostDTO
 from beanie import init_beanie
-from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import AsyncMongoClient
 import os
 
 async def test_local_performance():
@@ -21,7 +21,7 @@ async def test_local_performance():
     
     # Setup database
     mongo_url = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
-    client = AsyncIOMotorClient(mongo_url)
+    client = AsyncMongoClient(mongo_url)
     database = client.portfolio_performance_test
     await init_beanie(database=database, document_models=[Portfolio])
     

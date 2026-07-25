@@ -32,7 +32,7 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 # Extract and install dependencies only (not the package itself)
 RUN uv pip install --no-cache-dir \
-    beanie>=1.29.0 \
+    beanie>=2.0.0 \
     dnspython>=2.7.0 \
     "fastapi[standard]>=0.115.12" \
     gunicorn>=23.0.0 \
@@ -51,7 +51,7 @@ RUN uv pip install --no-cache-dir \
     opentelemetry-instrumentation-requests>=0.55b1 \
     opentelemetry-instrumentation-httpx>=0.55b1 \
     psutil>=6.1.0 \
-    motor>=3.7.1
+    pymongo>=4.10.0
 
 # Copy application code
 COPY app/ ./app/

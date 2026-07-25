@@ -1,4 +1,4 @@
-from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import AsyncMongoClient
 from app.config import settings
 from app.tracing import trace_database_call
 import logging
@@ -9,7 +9,7 @@ import asyncio
 logger = logging.getLogger(__name__)
 
 
-def create_optimized_client(mongodb_uri: Optional[str] = None) -> AsyncIOMotorClient:
+def create_optimized_client(mongodb_uri: Optional[str] = None) -> AsyncMongoClient:
     """
     Create optimized MongoDB client with tuned connection settings for performance.
     
@@ -22,7 +22,7 @@ def create_optimized_client(mongodb_uri: Optional[str] = None) -> AsyncIOMotorCl
         mongodb_uri: MongoDB connection URI (optional, uses settings default)
         
     Returns:
-        Configured AsyncIOMotorClient with optimized settings
+        Configured AsyncMongoClient with optimized settings
     """
     try:
         from app.environment_config import get_config_manager
@@ -49,7 +49,7 @@ def create_optimized_client(mongodb_uri: Optional[str] = None) -> AsyncIOMotorCl
     uri = mongodb_uri or settings.mongodb_uri
     
     # Optimized connection parameters
-    client = AsyncIOMotorClient(
+    client = AsyncMongoClient(
         uri,
         # Connection pool settings
         maxPoolSize=max_pool_size,           # Maximum connections in pool
@@ -91,7 +91,7 @@ def create_optimized_client(mongodb_uri: Optional[str] = None) -> AsyncIOMotorCl
     return client
 
 
-async def test_connection_health(client: AsyncIOMotorClient, timeout: float = 5.0) -> bool:
+async def test_connection_health(client: AsyncMongoClient, timeout: float = 5.0) -> bool:
     """
     Test MongoDB connection health with timeout.
     
@@ -117,7 +117,7 @@ async def test_connection_health(client: AsyncIOMotorClient, timeout: float = 5.
         return False
 
 
-async def get_connection_pool_stats(client: AsyncIOMotorClient) -> dict:
+async def get_connection_pool_stats(client: AsyncMongoClient) -> dict:
     """
     Get connection pool statistics for monitoring.
     
@@ -149,7 +149,7 @@ async def get_connection_pool_stats(client: AsyncIOMotorClient) -> dict:
             "connection_configured": False
         }
 
-async def create_indexes(client: AsyncIOMotorClient):
+async def create_indexes(client: AsyncMongoClient):
     """
     Create MongoDB indexes for optimal search performance using provided client.
     

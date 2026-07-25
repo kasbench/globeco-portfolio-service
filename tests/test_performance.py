@@ -4,7 +4,7 @@ from httpx import AsyncClient, ASGITransport
 from app.main import app
 from app.models import Portfolio
 from app.config import settings
-from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import AsyncMongoClient
 from beanie import init_beanie
 from datetime import datetime, UTC
 
@@ -12,7 +12,7 @@ from datetime import datetime, UTC
 async def test_exact_name_lookup_performance(mongodb_container):
     """Test that exact name lookup meets < 200ms requirement"""
     # Initialize Beanie with the test MongoDB
-    client = AsyncIOMotorClient(settings.mongodb_uri)
+    client = AsyncMongoClient(settings.mongodb_uri)
     await init_beanie(database=client[settings.mongodb_db], document_models=[Portfolio])
     
     # Clean up any existing portfolios
@@ -63,7 +63,7 @@ async def test_exact_name_lookup_performance(mongodb_container):
 async def test_partial_name_search_performance(mongodb_container):
     """Test that partial name search meets < 500ms requirement"""
     # Initialize Beanie with the test MongoDB
-    client = AsyncIOMotorClient(settings.mongodb_uri)
+    client = AsyncMongoClient(settings.mongodb_uri)
     await init_beanie(database=client[settings.mongodb_db], document_models=[Portfolio])
     
     # Clean up any existing portfolios
@@ -127,7 +127,7 @@ async def test_partial_name_search_performance(mongodb_container):
 async def test_retrieve_all_portfolios_performance(mongodb_container):
     """Test that retrieving all portfolios meets < 300ms requirement"""
     # Initialize Beanie with the test MongoDB
-    client = AsyncIOMotorClient(settings.mongodb_uri)
+    client = AsyncMongoClient(settings.mongodb_uri)
     await init_beanie(database=client[settings.mongodb_db], document_models=[Portfolio])
     
     # Clean up any existing portfolios
@@ -171,7 +171,7 @@ async def test_retrieve_all_portfolios_performance(mongodb_container):
 async def test_pagination_performance(mongodb_container):
     """Test pagination performance with various page sizes"""
     # Initialize Beanie with the test MongoDB
-    client = AsyncIOMotorClient(settings.mongodb_uri)
+    client = AsyncMongoClient(settings.mongodb_uri)
     await init_beanie(database=client[settings.mongodb_db], document_models=[Portfolio])
     
     # Clean up any existing portfolios
@@ -219,7 +219,7 @@ async def test_pagination_performance(mongodb_container):
 async def test_concurrent_search_performance(mongodb_container):
     """Test performance under concurrent search requests"""
     # Initialize Beanie with the test MongoDB
-    client = AsyncIOMotorClient(settings.mongodb_uri)
+    client = AsyncMongoClient(settings.mongodb_uri)
     await init_beanie(database=client[settings.mongodb_db], document_models=[Portfolio])
     
     # Clean up any existing portfolios
@@ -265,7 +265,7 @@ async def test_concurrent_search_performance(mongodb_container):
 async def test_database_index_effectiveness(mongodb_container):
     """Test that database indexes are effective for search performance"""
     # Initialize Beanie with the test MongoDB
-    client = AsyncIOMotorClient(settings.mongodb_uri)
+    client = AsyncMongoClient(settings.mongodb_uri)
     await init_beanie(database=client[settings.mongodb_db], document_models=[Portfolio])
     
     # Clean up any existing portfolios
@@ -317,7 +317,7 @@ async def test_database_index_effectiveness(mongodb_container):
 async def test_memory_usage_stability(mongodb_container):
     """Test that repeated searches don't cause memory leaks or performance degradation"""
     # Initialize Beanie with the test MongoDB
-    client = AsyncIOMotorClient(settings.mongodb_uri)
+    client = AsyncMongoClient(settings.mongodb_uri)
     await init_beanie(database=client[settings.mongodb_db], document_models=[Portfolio])
     
     # Clean up any existing portfolios

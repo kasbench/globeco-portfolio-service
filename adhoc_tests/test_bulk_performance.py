@@ -10,14 +10,14 @@ from app.models import Portfolio
 from app.services import PortfolioService
 from app.schemas import PortfolioPostDTO
 from beanie import init_beanie
-from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import AsyncMongoClient
 import os
 
 async def setup_database():
     """Initialize database connection for testing"""
     # Use test database
     mongo_url = os.getenv("MONGO_URL", "mongodb://localhost:27017")
-    client = AsyncIOMotorClient(mongo_url)
+    client = AsyncMongoClient(mongo_url)
     
     # Use a test database
     database = client.portfolio_test_db

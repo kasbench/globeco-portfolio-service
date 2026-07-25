@@ -21,7 +21,7 @@ from typing import Optional
 
 from fastapi import FastAPI
 from beanie import init_beanie
-from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import AsyncMongoClient
 
 # Import optimized components
 from app.config import settings
@@ -41,17 +41,17 @@ from app.health_endpoints import router as health_router
 # Global state for graceful shutdown
 _shutdown_event: Optional[asyncio.Event] = None
 _unified_monitoring = None
-_database_client: Optional[AsyncIOMotorClient] = None
+_database_client: Optional[AsyncMongoClient] = None
 
 # Setup structured logging first
 logger = setup_logging(log_level=settings.log_level)
 
-async def initialize_database() -> AsyncIOMotorClient:
+async def initialize_database() -> AsyncMongoClient:
     """
     Initialize optimized database connection with proper error handling.
     
     Returns:
-        AsyncIOMotorClient instance
+        AsyncMongoClient instance
         
     Raises:
         RuntimeError: If database initialization fails

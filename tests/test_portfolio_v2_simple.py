@@ -3,7 +3,7 @@ from httpx import AsyncClient, ASGITransport
 from app.main import app
 from app.models import Portfolio
 from app.config import settings
-from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import AsyncMongoClient
 from beanie import init_beanie
 from datetime import datetime, UTC
 
@@ -11,7 +11,7 @@ from datetime import datetime, UTC
 async def test_v2_api_basic_functionality(mongodb_container):
     """Test basic v2 API functionality with search and pagination"""
     # Initialize Beanie with the test MongoDB
-    client = AsyncIOMotorClient(settings.mongodb_uri)
+    client = AsyncMongoClient(settings.mongodb_uri)
     await init_beanie(database=client[settings.mongodb_db], document_models=[Portfolio])
 
     # Clean up any existing portfolios
@@ -107,7 +107,7 @@ async def test_v2_api_basic_functionality(mongodb_container):
 async def test_v1_vs_v2_backward_compatibility(mongodb_container):
     """Test that v1 and v2 APIs are compatible and return consistent data"""
     # Initialize Beanie with the test MongoDB
-    client = AsyncIOMotorClient(settings.mongodb_uri)
+    client = AsyncMongoClient(settings.mongodb_uri)
     await init_beanie(database=client[settings.mongodb_db], document_models=[Portfolio])
 
     # Clean up any existing portfolios

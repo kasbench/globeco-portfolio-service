@@ -9,13 +9,13 @@ from datetime import datetime, UTC
 from app.models import Portfolio
 from app.schemas import PortfolioPostDTO
 from beanie import init_beanie
-from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import AsyncMongoClient
 import os
 
 async def setup_database():
     """Initialize database connection for testing"""
     mongo_url = os.getenv("MONGO_URL", "mongodb://localhost:27017")
-    client = AsyncIOMotorClient(mongo_url)
+    client = AsyncMongoClient(mongo_url)
     database = client.portfolio_comparison_test
     await init_beanie(database=database, document_models=[Portfolio])
     await Portfolio.delete_all()

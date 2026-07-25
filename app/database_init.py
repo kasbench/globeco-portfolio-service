@@ -8,7 +8,7 @@ even when the FastAPI lifespan events don't run (e.g., during testing).
 import asyncio
 import logging
 from typing import Optional
-from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import AsyncMongoClient
 from beanie import init_beanie
 
 from app.config import settings
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 # Global state to track initialization
 _database_initialized = False
-_database_client: Optional[AsyncIOMotorClient] = None
+_database_client: Optional[AsyncMongoClient] = None
 _initialization_lock = asyncio.Lock()
 
 
@@ -43,8 +43,8 @@ async def ensure_database_initialized() -> bool:
     try:
         # Try a simple database operation to check if Beanie is working
         from app.models import Portfolio
-        # If we can access the motor collection, Beanie is initialized
-        if Portfolio.get_motor_collection() is not None:
+        # If we can access the pymongo collection, Beanie is initialized
+        if Portfolio.get_pymongo_collection() is not None:
             # Beanie is already initialized by the main application
             if not _database_initialized:
                 logger.debug("Database already initialized by application startup, skipping duplicate initialization")
@@ -65,7 +65,7 @@ async def ensure_database_initialized() -> bool:
         # Check again if Beanie was initialized while we were waiting for the lock
         try:
             from app.models import Portfolio
-            if Portfolio.get_motor_collection() is not None:
+            if Portfolio.get_pymongo_collection() is not None:
                 logger.debug("Database was initialized while waiting for lock, skipping duplicate initialization")
                 _database_initialized = True
                 return True
@@ -129,6 +129,6 @@ def is_database_initialized() -> bool:
     return _database_initialized
 
 
-def get_database_client() -> Optional[AsyncIOMotorClient]:
+def get_database_client() -> Optional[AsyncMongoClient]:
     """Get the current database client if initialized."""
     return _database_client

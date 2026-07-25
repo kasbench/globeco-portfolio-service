@@ -3,14 +3,14 @@ from httpx import AsyncClient, ASGITransport
 from app.main import app
 from app.models import Portfolio
 from app.config import settings
-from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import AsyncMongoClient
 from beanie import init_beanie
 
 @pytest.mark.asyncio
 async def test_parameter_validation_comprehensive(mongodb_container):
     """Comprehensive unit tests for parameter validation"""
     # Initialize Beanie with the test MongoDB
-    client = AsyncIOMotorClient(settings.mongodb_uri)
+    client = AsyncMongoClient(settings.mongodb_uri)
     await init_beanie(database=client[settings.mongodb_db], document_models=[Portfolio])
     
     # Clean up any existing portfolios
@@ -115,7 +115,7 @@ async def test_parameter_validation_comprehensive(mongodb_container):
 async def test_name_format_edge_cases(mongodb_container):
     """Test edge cases for name format validation"""
     # Initialize Beanie with the test MongoDB
-    client = AsyncIOMotorClient(settings.mongodb_uri)
+    client = AsyncMongoClient(settings.mongodb_uri)
     await init_beanie(database=client[settings.mongodb_db], document_models=[Portfolio])
     
     # Clean up any existing portfolios
@@ -161,7 +161,7 @@ async def test_name_format_edge_cases(mongodb_container):
 async def test_pagination_parameter_combinations(mongodb_container):
     """Test various combinations of pagination parameters"""
     # Initialize Beanie with the test MongoDB
-    client = AsyncIOMotorClient(settings.mongodb_uri)
+    client = AsyncMongoClient(settings.mongodb_uri)
     await init_beanie(database=client[settings.mongodb_db], document_models=[Portfolio])
     
     # Clean up any existing portfolios

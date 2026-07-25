@@ -3,7 +3,7 @@ from httpx import AsyncClient, ASGITransport
 from app.main import app
 from app.models import Portfolio
 from app.config import settings
-from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import AsyncMongoClient
 from beanie import init_beanie
 from datetime import datetime, UTC
 
@@ -11,7 +11,7 @@ from datetime import datetime, UTC
 async def test_exact_name_search_comprehensive(mongodb_container):
     """Comprehensive integration tests for exact name search"""
     # Initialize Beanie with the test MongoDB
-    client = AsyncIOMotorClient(settings.mongodb_uri)
+    client = AsyncMongoClient(settings.mongodb_uri)
     await init_beanie(database=client[settings.mongodb_db], document_models=[Portfolio])
     
     # Clean up any existing portfolios
@@ -111,7 +111,7 @@ async def test_exact_name_search_comprehensive(mongodb_container):
 async def test_partial_name_search_comprehensive(mongodb_container):
     """Comprehensive integration tests for partial name search"""
     # Initialize Beanie with the test MongoDB
-    client = AsyncIOMotorClient(settings.mongodb_uri)
+    client = AsyncMongoClient(settings.mongodb_uri)
     await init_beanie(database=client[settings.mongodb_db], document_models=[Portfolio])
     
     # Clean up any existing portfolios
@@ -204,7 +204,7 @@ async def test_partial_name_search_comprehensive(mongodb_container):
 async def test_case_sensitivity_behavior(mongodb_container):
     """Test case-insensitive search behavior comprehensively"""
     # Initialize Beanie with the test MongoDB
-    client = AsyncIOMotorClient(settings.mongodb_uri)
+    client = AsyncMongoClient(settings.mongodb_uri)
     await init_beanie(database=client[settings.mongodb_db], document_models=[Portfolio])
     
     # Clean up any existing portfolios
@@ -261,7 +261,7 @@ async def test_case_sensitivity_behavior(mongodb_container):
 async def test_search_with_special_characters(mongodb_container):
     """Test search behavior with special characters in portfolio names"""
     # Initialize Beanie with the test MongoDB
-    client = AsyncIOMotorClient(settings.mongodb_uri)
+    client = AsyncMongoClient(settings.mongodb_uri)
     await init_beanie(database=client[settings.mongodb_db], document_models=[Portfolio])
     
     # Clean up any existing portfolios
@@ -326,7 +326,7 @@ async def test_search_with_special_characters(mongodb_container):
 async def test_search_result_ordering(mongodb_container):
     """Test that search results are properly ordered by dateCreated descending"""
     # Initialize Beanie with the test MongoDB
-    client = AsyncIOMotorClient(settings.mongodb_uri)
+    client = AsyncMongoClient(settings.mongodb_uri)
     await init_beanie(database=client[settings.mongodb_db], document_models=[Portfolio])
     
     # Clean up any existing portfolios

@@ -25,7 +25,7 @@ from pymongo.errors import (
 )
 from datetime import datetime, UTC
 import asyncio
-from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import AsyncMongoClient
 
 logger = get_logger(__name__)
 
@@ -40,7 +40,7 @@ class OptimizedPortfolioService:
     
     def __init__(self):
         """Initialize optimized service with connection management."""
-        self._client: Optional[AsyncIOMotorClient] = None
+        self._client: Optional[AsyncMongoClient] = None
         self._db = None
         self._collection = None
     

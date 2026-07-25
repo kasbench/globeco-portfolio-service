@@ -9,7 +9,7 @@ from app.models import Portfolio
 from app.services import PortfolioService
 from app.schemas import PortfolioPostDTO
 from beanie import init_beanie
-from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import AsyncMongoClient
 import os
 
 async def test_bulk_fix():
@@ -17,7 +17,7 @@ async def test_bulk_fix():
     
     # Setup database
     mongo_url = os.getenv("MONGO_URL", "mongodb://localhost:27017")
-    client = AsyncIOMotorClient(mongo_url)
+    client = AsyncMongoClient(mongo_url)
     database = client.portfolio_fix_test
     await init_beanie(database=database, document_models=[Portfolio])
     await Portfolio.delete_all()

@@ -3,7 +3,7 @@ from httpx import AsyncClient, ASGITransport
 from app.main import app
 from app.models import Portfolio
 from app.config import settings
-from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import AsyncMongoClient
 from beanie import init_beanie
 from datetime import datetime, UTC
 
@@ -11,7 +11,7 @@ from datetime import datetime, UTC
 async def test_v1_endpoint_unchanged_behavior(mongodb_container):
     """Test that v1 endpoint behavior is completely unchanged"""
     # Initialize Beanie with the test MongoDB
-    client = AsyncIOMotorClient(settings.mongodb_uri)
+    client = AsyncMongoClient(settings.mongodb_uri)
     await init_beanie(database=client[settings.mongodb_db], document_models=[Portfolio])
     
     # Clean up any existing portfolios
@@ -126,7 +126,7 @@ async def test_v1_endpoint_unchanged_behavior(mongodb_container):
 async def test_v1_v2_data_consistency(mongodb_container):
     """Test that v1 and v2 endpoints return consistent data"""
     # Initialize Beanie with the test MongoDB
-    client = AsyncIOMotorClient(settings.mongodb_uri)
+    client = AsyncMongoClient(settings.mongodb_uri)
     await init_beanie(database=client[settings.mongodb_db], document_models=[Portfolio])
     
     # Clean up any existing portfolios
@@ -211,7 +211,7 @@ async def test_v1_v2_data_consistency(mongodb_container):
 async def test_v1_response_format_unchanged(mongodb_container):
     """Test that v1 response format is exactly as before"""
     # Initialize Beanie with the test MongoDB
-    client = AsyncIOMotorClient(settings.mongodb_uri)
+    client = AsyncMongoClient(settings.mongodb_uri)
     await init_beanie(database=client[settings.mongodb_db], document_models=[Portfolio])
     
     # Clean up any existing portfolios
@@ -276,7 +276,7 @@ async def test_v1_response_format_unchanged(mongodb_container):
 async def test_v1_error_responses_unchanged(mongodb_container):
     """Test that v1 error responses are unchanged"""
     # Initialize Beanie with the test MongoDB
-    client = AsyncIOMotorClient(settings.mongodb_uri)
+    client = AsyncMongoClient(settings.mongodb_uri)
     await init_beanie(database=client[settings.mongodb_db], document_models=[Portfolio])
     
     # Clean up any existing portfolios
@@ -320,7 +320,7 @@ async def test_v1_error_responses_unchanged(mongodb_container):
 async def test_v1_ordering_behavior(mongodb_container):
     """Test that v1 ordering behavior is unchanged"""
     # Initialize Beanie with the test MongoDB
-    client = AsyncIOMotorClient(settings.mongodb_uri)
+    client = AsyncMongoClient(settings.mongodb_uri)
     await init_beanie(database=client[settings.mongodb_db], document_models=[Portfolio])
     
     # Clean up any existing portfolios
