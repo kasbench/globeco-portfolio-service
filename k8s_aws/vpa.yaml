@@ -12,7 +12,7 @@ spec:
     kind: Deployment
     name: globeco-portfolio-service
   updatePolicy:
-    updateMode: "InPlaceOrRecreate  "
+    updateMode: "InPlaceOrRecreate"
   resourcePolicy:
     containerPolicies:
       - containerName: globeco-portfolio-service
