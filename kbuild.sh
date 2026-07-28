@@ -21,3 +21,6 @@ echo ""
 echo "=== Build complete ==="
 echo "  Standard:  kasbench/globeco-portfolio-service:${VERSION}"
 echo "  High-CPU:  kasbench/globeco-portfolio-service-high-cpu:${VERSION}"
+
+k delete -f k8s/globeco-portfolio-service.yaml
+k apply -f k8s/globeco-portfolio-service.yaml
