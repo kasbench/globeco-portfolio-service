@@ -361,6 +361,15 @@ except Exception as e:
     logger.error(f"Failed to configure middleware stack: {e}", exc_info=True)
     # Don't raise here - let the app start without middleware if needed
 
+# Apply CPU burn middleware if HIGH_CPU_MODE is enabled (for high-cpu benchmark variant)
+try:
+    from app.cpu_burn_middleware import HIGH_CPU_MODE, CPUBurnMiddleware
+    if HIGH_CPU_MODE:
+        app.add_middleware(CPUBurnMiddleware)
+        logger.info("CPU burn middleware enabled (HIGH_CPU_MODE=true)")
+except Exception as e:
+    logger.error(f"Failed to apply CPU burn middleware: {e}", exc_info=True)
+
 # Include API routers immediately (not in startup event)
 # Note: Routers already have their prefixes defined, so we don't add them here
 app.include_router(api_v1.router, tags=["v1"])
