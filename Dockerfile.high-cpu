@@ -84,7 +84,7 @@ ENV PATH="/opt/venv/bin:$PATH"
 ENV PYTHONPATH="/app"
 
 # Enable high-CPU mode - this is the only difference from the standard image
-ENV HIGH_CPU_MODE=true
+ENV HIGH_CPU_MODE=false
 ENV CPU_BURN_DURATION_MS=50
 
 # Create non-root user for security
