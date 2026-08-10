@@ -85,7 +85,12 @@ spec:
               value: "50"     # Larger pool for development
             - name: MIN_POOL_SIZE
               value: "10"
-          resources:
+           resizePolicy:
+            - resourceName: cpu
+              restartPolicy: NotRequired
+            - resourceName: memory
+              restartPolicy: RestartContainer
+         resources:
             requests:
               cpu: "200m"
               memory: "300Mi"
