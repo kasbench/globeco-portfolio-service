@@ -15,6 +15,19 @@ spec:
       labels:
         app: globeco-portfolio-service
     spec:
+      initContainers:
+        - name: wait-for-mongodb
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for MongoDB at globeco-portfolio-service-mongodb:27017..."
+              until nc -z globeco-portfolio-service-mongodb 27017; do
+                echo "MongoDB not ready yet, retrying in 2s..."
+                sleep 2
+              done
+              echo "MongoDB is reachable."
       containers:
         - name: globeco-portfolio-service
           image: kasbench/globeco-portfolio-service:1.0.4
