@@ -8,6 +8,16 @@ metadata:
 spec:
   {{- if eq .Values.autoscaler "vpa" }}
   replicas: 2
+  {{- else if eq .Values.autoscaler "horizontal-2" }}
+  replicas: 2
+  {{- else if eq .Values.autoscaler "horizontal-3" }}
+  replicas: 3
+  {{- else if eq .Values.autoscaler "horizontal-4" }}
+  replicas: 4
+  {{- else if eq .Values.autoscaler "horizontal-5" }}
+  replicas: 5
+  {{- else if eq .Values.autoscaler "horizontal-6" }}
+  replicas: 6
   {{- else }}
   replicas: 1
   {{- end }}
@@ -120,11 +130,22 @@ spec:
               restartPolicy: RestartContainer
           resources:
             requests:
-              cpu: "200m"
               memory: "300Mi"
+              {{- if eq .Values.autoscaler "vertical-2" }}
+              cpu: "390.0m"
+              {{- else if eq .Values.autoscaler "vertical-3" }}
+              cpu: "520.0m"
+              {{- else if eq .Values.autoscaler "vertical-4" }}
+              cpu: "650.0m"
+              {{- else if eq .Values.autoscaler "vertical-5" }}
+              cpu: "780.0m"
+              {{- else if eq .Values.autoscaler "vertical-6" }}
+              cpu: "910.0m"
+              {{- else }}
+              cpu: "260m"
+              {{- end }}
             limits:
-              cpu: "200m"
-              memory: "300Mi"
+              memory: "6000Mi"
           livenessProbe:
             httpGet:
               path: /

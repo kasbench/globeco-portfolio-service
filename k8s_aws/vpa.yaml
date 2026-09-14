@@ -18,10 +18,10 @@ spec:
       - containerName: globeco-portfolio-service
         minAllowed:
           cpu: 100m
-          memory: 200Mi
+          memory: 300Mi
         maxAllowed:
           cpu: 2000m
           memory: 2Gi
         controlledResources: ["cpu", "memory"]
-        controlledValues: RequestsAndLimits
+        controlledValues: RequestsOnly
 {{- end -}}
