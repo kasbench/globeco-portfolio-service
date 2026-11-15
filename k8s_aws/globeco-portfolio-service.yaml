@@ -39,6 +39,13 @@ spec:
                 sleep 2
               done
               echo "MongoDB is reachable."
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 50m
+              memory: 64Mi
       containers:
         - name: globeco-portfolio-service
           image: kasbench/globeco-portfolio-service:1.0.4
